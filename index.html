@@ -1447,34 +1447,44 @@
   <!-- MODAL LOGIN -->
   <div id="modal-auth" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm hidden flex items-center justify-center p-4">
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200">
-      <div class="bg-slate-900 p-5 text-white text-center">
+      <div class="bg-slate-900 p-5 text-white text-center relative">
+        <button onclick="ModalManager.close('modal-auth')" class="absolute top-4 right-4 text-slate-400 hover:text-white text-lg"><i class="fa-solid fa-xmark"></i></button>
         <i class="fa-solid fa-user-shield text-3xl text-indigo-400 mb-2"></i>
-        <h3 class="text-lg font-bold">Autenticação no Sistema</h3>
-        <p class="text-xs text-slate-400">Escolha um servidor cadastrado para simular o login</p>
+        <h3 class="text-lg font-bold">Autenticação de Servidor</h3>
+        <p class="text-xs text-slate-400">Informe suas credenciais registradas para acessar o sistema</p>
       </div>
       
-      <div class="p-6 space-y-3">
+      <form onsubmit="confirmUserLogin(event)" class="p-6 space-y-4 text-xs">
         <div>
-          <label class="block font-bold text-xs text-slate-700 mb-1">Selecione o Servidor para Login:</label>
-          <select id="login-user-select" class="w-full text-xs border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 bg-slate-50 font-semibold"></select>
-        </div>
-
-        <div class="pt-2 border-t border-slate-200">
-          <p class="font-bold text-xs text-slate-700 mb-2">Ou altere para um Perfil Genérico:</p>
-          <div class="grid grid-cols-2 gap-2 text-[11px]">
-            <button onclick="setGenericProfile('ADMINISTRADOR')" class="p-2 border rounded-lg hover:bg-indigo-50 font-bold text-slate-700">ADMINISTRADOR</button>
-            <button onclick="setGenericProfile('COORDENADOR')" class="p-2 border rounded-lg hover:bg-indigo-50 font-bold text-slate-700">COORDENADOR</button>
-            <button onclick="setGenericProfile('SUPERINTENDENTE')" class="p-2 border rounded-lg hover:bg-indigo-50 font-bold text-slate-700">SUPERINTENDENTE</button>
-            <button onclick="setGenericProfile('DELEGADO')" class="p-2 border rounded-lg hover:bg-indigo-50 font-bold text-slate-700">DELEGADO</button>
-            <button onclick="setGenericProfile('APJ')" class="p-2 border rounded-lg hover:bg-indigo-50 font-bold text-slate-700">APJ</button>
+          <label class="block font-bold text-slate-700 mb-1">Buscar Servidor (Nome ou Login):</label>
+          <div class="relative">
+            <i class="fa-solid fa-magnifying-glass absolute left-3 top-3 text-slate-400"></i>
+            <input type="text" id="login-user-filter" oninput="filterLoginUsersDropdown()" placeholder="Digite o nome ou login (ex: del.marcelo)..." class="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white font-medium">
           </div>
         </div>
-      </div>
 
-      <div class="bg-slate-50 p-3 flex justify-between items-center border-t border-slate-200">
-        <button onclick="setGenericProfile('VISUALIZADOR')" class="text-xs font-semibold text-slate-500 hover:text-slate-800">Entrar como Público (Visualizador)</button>
-        <button onclick="confirmUserLogin()" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow">Confirmar Login</button>
-      </div>
+        <div>
+          <label class="block font-bold text-slate-700 mb-1">Selecione o Servidor:</label>
+          <select id="login-user-select" required class="w-full text-xs border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 bg-slate-50 font-semibold text-slate-800" size="4"></select>
+        </div>
+
+        <div>
+          <label class="block font-bold text-slate-700 mb-1">Senha de Acesso:</label>
+          <div class="relative">
+            <i class="fa-solid fa-key absolute left-3 top-3 text-slate-400"></i>
+            <input type="password" id="login-password-input" required placeholder="Digite sua senha (padrão: Central123)..." class="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white font-mono">
+          </div>
+        </div>
+
+        <div class="pt-2 border-t border-slate-200 flex items-center justify-between gap-2">
+          <button type="button" onclick="ModalManager.close('modal-auth')" class="text-xs font-semibold text-slate-500 hover:text-slate-800">
+            Continuar como Visualizador (Acesso Público)
+          </button>
+          <button type="submit" id="btn-login-submit" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold shadow transition flex items-center gap-1.5">
+            <i class="fa-solid fa-right-to-bracket"></i> Entrar
+          </button>
+        </div>
+      </form>
     </div>
   </div>
 
@@ -1869,20 +1879,6 @@
       return appState.ferias.find(f => f.servidorId === servidorId && (dateStartStr <= f.fim && f.inicio <= endStr));
     }
 
-    
-    function normalizeText(text) {
-      return String(text || '')
-        .toLowerCase()
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "");
-    }
-
-    function checkFeriasConflict(servidorId, dateStartStr, dateEndStr) {
-      if (!servidorId || !dateStartStr) return null;
-      const endStr = dateEndStr || dateStartStr;
-      return appState.ferias.find(f => f.servidorId === servidorId && (dateStartStr <= f.fim && f.inicio <= endStr));
-    }
-
     function formatPhoneNumber(phone) {
       if (!phone) return '(00)00000-0000';
       const digits = phone.replace(/\D/g, '');
@@ -1973,30 +1969,29 @@
 
 window.addEventListener('DOMContentLoaded', () => {
       loadState();
-      loadStateFromFirestore(() => { renderCurrentProfile(); renderCalendar(); renderServidoresTable(); renderSubdivisoesCards(); renderFeriadosTable(); renderFeriasTable(); renderSobreavisoTable(); renderCentralVigentesTable(); });
-
-      // MODO DEV: Garante a criação do usuário Admin padrão se a base estiver limpa
       ensureAdminUserExists();
 
-      // Produção: Inicializa com perfil Público / Visualizador até que o usuário realize login oficial
       appState.currentUserServidorId = null;
       appState.profile = 'VISUALIZADOR';
 
-      renderCurrentProfile();
-      renderCalendar();
-      renderServidoresTable();
-      renderSubdivisoesCards();
-      renderFeriadosTable();
-      renderFeriasTable();
-      renderSobreavisoTable();
-      renderCentralVigentesTable();
-      updateDelegaciaDropdowns();
-      populateAssignServidorDropdown();
-      populateLoginUserSelect();
-      populateServidorFilters();
-      populateSobreavisoDelegaciaDropdowns();
       setupTooltipEvents();
-      suggestNextCentralShift();
+
+      loadStateFromFirestore(() => {
+        renderCurrentProfile();
+        renderCalendar();
+        renderServidoresTable();
+        renderSubdivisoesCards();
+        renderFeriadosTable();
+        renderFeriasTable();
+        renderSobreavisoTable();
+        renderCentralVigentesTable();
+        updateDelegaciaDropdowns();
+        populateAssignServidorDropdown();
+        populateLoginUserSelect();
+        populateServidorFilters();
+        populateSobreavisoDelegaciaDropdowns();
+        suggestNextCentralShift();
+      });
     });
 
     function ensureAdminUserExists() {
@@ -2149,29 +2144,68 @@ window.addEventListener('DOMContentLoaded', () => {
       return appState.servidores.find(s => s.id === appState.currentUserServidorId) || null;
     }
 
-    function populateLoginUserSelect() {
+    function populateLoginUserSelect(searchTerm = '') {
       const select = document.getElementById('login-user-select');
       if (!select) return;
-      select.innerHTML = '<option value="">-- SELECIONE O SERVIDOR PARA LOGIN --</option>';
+      select.innerHTML = '';
 
-      appState.servidores.forEach(srv => {
-        select.innerHTML += `<option value="${srv.id}">${srv.cargo} ${srv.nome} (${srv.login}) - PERFIL: ${srv.nivelAcesso || 'APJ'}</option>`;
+      let list = [...appState.servidores];
+      if (searchTerm) {
+        const term = normalizeText(searchTerm);
+        list = list.filter(s => {
+          const fullText = normalizeText(`${s.cargo} ${s.nome} ${s.login}`);
+          return fullText.includes(term);
+        });
+      }
+
+      if (list.length === 0) {
+        select.innerHTML = '<option value="" disabled>Nenhum servidor encontrado com o termo digitado</option>';
+        return;
+      }
+
+      list.forEach(srv => {
+        select.innerHTML += `<option value="${srv.id}">${srv.cargo} ${srv.nome} (${srv.login})</option>`;
       });
+
+      if (list.length > 0) select.selectedIndex = 0;
     }
 
-    function confirmUserLogin() {
+    function filterLoginUsersDropdown() {
+      const term = document.getElementById('login-user-filter').value;
+      populateLoginUserSelect(term);
+    }
+
+    function confirmUserLogin(event) {
+      if (event) event.preventDefault();
+
       const selectedId = document.getElementById('login-user-select').value;
+      const password = document.getElementById('login-password-input').value;
+      const submitBtn = document.getElementById('btn-login-submit');
+
       if (!selectedId) {
-        alert('Por favor, selecione um servidor para autenticar.');
+        alert('Por favor, selecione um servidor na lista para realizar o login.');
+        return;
+      }
+
+      if (!password) {
+        alert('Por favor, informe a senha de acesso.');
         return;
       }
 
       const srv = appState.servidores.find(s => s.id === selectedId);
-      if (srv) {
+      if (!srv) return;
+
+      const userEmail = `${srv.login}${FIREBASE_DOMAIN_SUFFIX}`;
+
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<i class="fa-solid fa-spinner animate-spin"></i> Autenticando...';
+      }
+
+      const executeLocalLogin = () => {
         appState.currentUserServidorId = srv.id;
         appState.profile = srv.nivelAcesso || (srv.cargo === 'DELEGADO' ? 'DELEGADO' : 'APJ');
 
-        // Selecionar por padrão a Delegacia e Subdivisão de lotação do servidor
         if (srv.delegaciaId) {
           const selectGestaoDel = document.getElementById('gestao-sobreaviso-delegacia');
           const selectFilterDel = document.getElementById('filter-delegacia-mode');
@@ -2187,7 +2221,6 @@ window.addEventListener('DOMContentLoaded', () => {
         renderCurrentProfile();
         populateSobreavisoDelegaciaDropdowns();
 
-        // Se for Delegado ou perfil com escopo de Delegacia, pré-selecionar no filtro da aba Servidores
         if (srv.delegaciaId && (appState.profile === 'DELEGADO' || getScopePermission('escopoServidores') === 'DELEGACIA')) {
           const filterServDel = document.getElementById('filter-servidor-delegacia');
           if (filterServDel) filterServDel.value = srv.delegaciaId;
@@ -2199,7 +2232,57 @@ window.addEventListener('DOMContentLoaded', () => {
         renderFeriadosTable();
         onDelegaciaSelectionChange();
         renderCentralVigentesTable();
+
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = '<i class="fa-solid fa-right-to-bracket"></i> Entrar';
+        }
+
+        document.getElementById('login-password-input').value = '';
+        document.getElementById('login-user-filter').value = '';
         ModalManager.close('modal-auth');
+        alert(`Login efetuado com sucesso! Bem-vindo(a), ${srv.nome}.`);
+      };
+
+      // Tenta autenticar no Firebase Auth
+      if (typeof firebase !== 'undefined' && firebase.auth) {
+        firebase.auth().signInWithEmailAndPassword(userEmail, password)
+          .then(() => {
+            executeLocalLogin();
+          })
+          .catch((error) => {
+            // Se o usuário ainda não existir no Auth, tenta criar com a senha padrão inicial
+            if (error.code === 'auth/user-not-found' && password === SENHA_PADRAO_PRIMEIRO_ACESSO) {
+              firebase.auth().createUserWithEmailAndPassword(userEmail, password)
+                .then(() => {
+                  executeLocalLogin();
+                })
+                .catch(errCreate => {
+                  alert('Erro ao registrar usuário no Firebase Auth: ' + errCreate.message);
+                  if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = '<i class="fa-solid fa-right-to-bracket"></i> Entrar';
+                  }
+                });
+            } else {
+              alert('Senha incorreta ou credencial inválida! Tente novamente ou use a senha padrão: Central123');
+              if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<i class="fa-solid fa-right-to-bracket"></i> Entrar';
+              }
+            }
+          });
+      } else {
+        // Fallback local se o SDK do Firebase Auth não estiver carregado
+        if (password === SENHA_PADRAO_PRIMEIRO_ACESSO) {
+          executeLocalLogin();
+        } else {
+          alert('Senha incorreta! Use a senha padrão: Central123');
+          if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<i class="fa-solid fa-right-to-bracket"></i> Entrar';
+          }
+        }
       }
     }
 
