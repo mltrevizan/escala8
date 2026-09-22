@@ -1680,7 +1680,7 @@
     const STORAGE_KEY = 'ESCALA_FLAGRANTES_V10';
 
     // FLAG DE DESENVOLVIMENTO (Altere para false para ativar a autenticação estrita no Firebase em produção)
-    const IS_DEV_MODE = true; 
+    const IS_DEV_MODE = false; 
     const DEFAULT_DEV_ADMIN_ID = 'srv_admin_dev';
     const FIREBASE_DOMAIN_SUFFIX = '@escala8.local';
     const SENHA_PADRAO_PRIMEIRO_ACESSO = 'Central123';
@@ -1977,16 +1977,9 @@ window.addEventListener('DOMContentLoaded', () => {
       // MODO DEV: Garante a criação do usuário Admin padrão se a base estiver limpa
       ensureAdminUserExists();
 
-      if (IS_DEV_MODE) {
-        // Auto-login imediato como Administrador para facilitar testes e desenvolvimento
-        const adminSrv = appState.servidores.find(s => s.login === 'admin' || s.id === DEFAULT_DEV_ADMIN_ID);
-        if (adminSrv) {
-          appState.currentUserServidorId = adminSrv.id;
-          appState.profile = 'ADMINISTRADOR';
-        } else {
-          appState.profile = 'ADMINISTRADOR';
-        }
-      }
+      // Produção: Inicializa com perfil Público / Visualizador até que o usuário realize login oficial
+      appState.currentUserServidorId = null;
+      appState.profile = 'VISUALIZADOR';
 
       renderCurrentProfile();
       renderCalendar();
@@ -3945,12 +3938,7 @@ Deseja confirmar o lançamento mesmo assim?`)) {
               th, td { border: 1px solid #ccc; padding: 6px; text-align: left; }
               th { background: #f1f5f9; }
             </style>
-          
-  <!-- Firebase App & Auth SDKs (v10 Compat) -->
-  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
-</head>
+          </head>
           <body>
             <h2>8ª CENTRAL REGIONAL DE FLAGRANTES - LOG DE MODIFICAÇÕES</h2>
             <p>Emissão: ${new Date().toLocaleString('pt-BR')}</p>
