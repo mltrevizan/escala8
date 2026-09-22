@@ -1866,6 +1866,15 @@
     }
 
     
+        async function hashPassword(text) {
+      if (!text) return '';
+      const encoder = new TextEncoder();
+      const data = encoder.encode(text);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
     function normalizeText(text) {
       return String(text || '')
         .toLowerCase()
@@ -2243,7 +2252,16 @@ window.addEventListener('DOMContentLoaded', () => {
         document.getElementById('login-password-input').value = '';
         document.getElementById('login-user-filter').value = '';
         ModalManager.close('modal-auth');
-        alert(`Login efetuado com sucesso! Bem-vindo(a), ${srv.nome}.`);
+
+        // VERIFICAÇÃO DE PRIMEIRO ACESSO OU USO DE SENHA PADRÃO
+        if (password === SENHA_PADRAO_PRIMEIRO_ACESSO || !srv.password) {
+          alert(`Bem-vindo(a), ${srv.nome}!
+
+Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, cadastre uma nova senha pessoal.`);
+          openManageLoginModal(srv.id);
+        } else {
+          alert(`Login efetuado com sucesso! Bem-vindo(a), ${srv.nome}.`);
+        }
       };
 
       // Validação prioritária da senha do servidor ou da senha padrão de primeiro acesso
@@ -4128,7 +4146,7 @@ Deseja confirmar o lançamento mesmo assim?`)) {
       ModalManager.open('modal-manage-login');
     }
 
-    function saveManagedLogin() {
+    async function saveManagedLogin() {
       const id = document.getElementById('manage-login-servidor-id').value;
       const newLogin = document.getElementById('manage-login-input').value.trim().toLowerCase();
       const newPassword = document.getElementById('manage-password-input').value.trim();
@@ -4148,14 +4166,14 @@ Deseja confirmar o lançamento mesmo assim?`)) {
       if (srv) {
         srv.login = newLogin;
         if (newPassword) {
-          srv.password = newPassword;
+          srv.password = await hashPassword(newPassword);
         }
         saveState();
         renderServidoresTable();
         populateLoginUserSelect();
-        addAuditLog('Alteração de Credenciais', `Login/Senha de ${srv.nome} atualizados`);
+        addAuditLog('Alteração de Credenciais', `Login/Senha de ${srv.nome} atualizados com hash criptográfico`);
         ModalManager.close('modal-manage-login');
-        alert(`Credenciais do servidor ${srv.nome} atualizadas com sucesso!`);
+        alert(`Credenciais do servidor ${srv.nome} atualizadas e criptografadas com sucesso!`);
       }
     }
 
