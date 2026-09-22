@@ -2057,7 +2057,7 @@ window.addEventListener('DOMContentLoaded', () => {
       appState.sobreavisos = [];
       appState.auditLogs = [];
       appState.padroesHorarios = { sobreavisoHoraIn: '09:00', periodicidadeHoras: 72, periodicidadePlantaoHoras: 24, plantaoUtilIn: '17:00', plantaoUtilOut: '09:00', plantaoFdsIn: '17:00', plantaoFdsOut: '17:00' };
-      saveState();
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
     }
 
     function saveState() {
@@ -2075,7 +2075,7 @@ window.addEventListener('DOMContentLoaded', () => {
       }
     }
 
-    // Função para carregar os dados do Cloud Firestore na inicialização
+    // Função para carregar os dados do Cloud Firestore na inicialização sem apagar o servidor
     function loadStateFromFirestore(callback) {
       if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
         const db = firebase.firestore();
@@ -2083,14 +2083,16 @@ window.addEventListener('DOMContentLoaded', () => {
           .then(doc => {
             if (doc.exists) {
               const remoteData = doc.data();
-              appState = { ...appState, ...remoteData };
-              localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
-              console.log('Dados do Cloud Firestore carregados!');
+              if (remoteData.servidores && remoteData.servidores.length > 0) {
+                appState = { ...appState, ...remoteData };
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
+                console.log('Dados do Cloud Firestore carregados com sucesso!');
+              }
             }
             if (callback) callback();
           })
           .catch(err => {
-            console.error('Erro ao buscar do Firestore, mantendo local:', err);
+            console.error('Erro ao buscar do Firestore:', err);
             if (callback) callback();
           });
       } else {
@@ -2358,11 +2360,7 @@ window.addEventListener('DOMContentLoaded', () => {
       const headerBar = document.getElementById('calendar-header-bar');
       const modeTitle = document.getElementById('calendar-mode-title');
 
-      if (mode === 'FERIAS') {
-        title.innerHTML = `<i class="fa-solid fa-plane-departure text-indigo-400"></i> Visualização Expandida de Férias Cadastradas`;
-      } else if (mode === 'FERIAS') {
-        title.innerHTML = `<i class="fa-solid fa-plane-departure text-indigo-400"></i> Visualização Expandida de Férias Cadastradas`;
-      } else if (mode === 'DELEGACIA') {
+      if (mode === 'DELEGACIA') {
         btnDelegacia.classList.add('hidden');
         btnCentral.classList.remove('hidden');
         boxFilterSdp.classList.add('hidden');
@@ -3673,11 +3671,7 @@ Deseja confirmar o lançamento mesmo assim?`)) {
 
       if (searchInput) searchInput.value = '';
 
-      if (mode === 'FERIAS') {
-        title.innerHTML = `<i class="fa-solid fa-plane-departure text-indigo-400"></i> Visualização Expandida de Férias Cadastradas`;
-      } else if (mode === 'FERIAS') {
-        title.innerHTML = `<i class="fa-solid fa-plane-departure text-indigo-400"></i> Visualização Expandida de Férias Cadastradas`;
-      } else if (mode === 'DELEGACIA') {
+      if (mode === 'DELEGACIA') {
         const delSelect = document.getElementById('gestao-sobreaviso-delegacia');
         const delObj = appState.delegacias.find(d => d.id === delSelect.value);
         title.innerHTML = `<i class="fa-solid fa-building-user text-emerald-400"></i> Lançamentos da Delegacia: ${delObj ? delObj.nome.toUpperCase() : ''}`;
@@ -3917,6 +3911,12 @@ Deseja confirmar o lançamento mesmo assim?`)) {
 Deseja confirmar o lançamento mesmo assim?`)) {
           return;
         }
+      }
+
+      const isDuplicateCentral = appState.escalas.some(e => e.id !== shiftId && e.data === data && e.periodo === periodo && e.servidorId === servidorId);
+      if (isDuplicateCentral) {
+        alert('Este servidor já está escalado para este mesmo turno e data na Central de Flagrantes.');
+        return;
       }
 
       if (shiftId) {
