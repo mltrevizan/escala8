@@ -1239,14 +1239,14 @@
           <input type="text" id="manage-login-input" class="w-full border border-slate-300 rounded-lg p-2 font-mono text-xs focus:ring-2 focus:ring-indigo-500">
         </div>
 
-        <div class="p-3 bg-slate-100 rounded-lg space-y-1">
-          <span class="font-bold text-slate-700 block">Status da Senha:</span>
-          <p class="text-slate-600">Padrão de primeiro acesso: <strong class="text-emerald-700">SEM SENHA</strong></p>
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">Definir Nova Senha de Acesso:</label>
+          <input type="password" id="manage-password-input" placeholder="Digite uma nova senha para este servidor..." class="w-full border border-slate-300 rounded-lg p-2 font-mono text-xs focus:ring-2 focus:ring-indigo-500">
         </div>
 
-        <button type="button" onclick="resetServidorPassword()" class="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 rounded-lg transition shadow-sm flex items-center justify-center gap-2">
-          <i class="fa-solid fa-key"></i> Resetar Senha para o Padrão
-        </button>
+        <div class="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-[11px]">
+          <i class="fa-solid fa-circle-info mr-1"></i> Se deixar o campo de senha em branco, a senha padrão (<strong>Central123</strong>) será mantida.
+        </div>
       </div>
       <div class="p-4 bg-slate-50 border-t border-slate-200 flex justify-end gap-2">
         <button onclick="ModalManager.close('modal-manage-login')" class="px-4 py-2 bg-slate-200 text-slate-700 rounded-lg font-semibold">Cancelar</button>
@@ -1692,7 +1692,7 @@
     // FLAG DE DESENVOLVIMENTO (Altere para false para ativar a autenticação estrita no Firebase em produção)
     const IS_DEV_MODE = false; 
     const DEFAULT_DEV_ADMIN_ID = 'srv_admin_dev';
-    const FIREBASE_DOMAIN_SUFFIX = '@escala8.local';
+    const FIREBASE_DOMAIN_SUFFIX = '@escala8-c85c0.firebaseapp.com';
     const SENHA_PADRAO_PRIMEIRO_ACESSO = 'Central123';
 
     // Configuração do Projeto Firebase: Escala8
@@ -2179,7 +2179,7 @@ window.addEventListener('DOMContentLoaded', () => {
       if (event) event.preventDefault();
 
       const selectedId = document.getElementById('login-user-select').value;
-      const password = document.getElementById('login-password-input').value;
+      const password = document.getElementById('login-password-input').value.trim();
       const submitBtn = document.getElementById('btn-login-submit');
 
       if (!selectedId) {
@@ -2195,7 +2195,7 @@ window.addEventListener('DOMContentLoaded', () => {
       const srv = appState.servidores.find(s => s.id === selectedId);
       if (!srv) return;
 
-      const userEmail = `${srv.login}${FIREBASE_DOMAIN_SUFFIX}`;
+      const expectedPassword = srv.password || SENHA_PADRAO_PRIMEIRO_ACESSO;
 
       if (submitBtn) {
         submitBtn.disabled = true;
@@ -2244,44 +2244,16 @@ window.addEventListener('DOMContentLoaded', () => {
         alert(`Login efetuado com sucesso! Bem-vindo(a), ${srv.nome}.`);
       };
 
-      // Tenta autenticar no Firebase Auth
-      if (typeof firebase !== 'undefined' && firebase.auth) {
-        firebase.auth().signInWithEmailAndPassword(userEmail, password)
-          .then(() => {
-            executeLocalLogin();
-          })
-          .catch((error) => {
-            // Se o usuário ainda não existir no Auth, tenta criar com a senha padrão inicial
-            if (error.code === 'auth/user-not-found' && password === SENHA_PADRAO_PRIMEIRO_ACESSO) {
-              firebase.auth().createUserWithEmailAndPassword(userEmail, password)
-                .then(() => {
-                  executeLocalLogin();
-                })
-                .catch(errCreate => {
-                  alert('Erro ao registrar usuário no Firebase Auth: ' + errCreate.message);
-                  if (submitBtn) {
-                    submitBtn.disabled = false;
-                    submitBtn.innerHTML = '<i class="fa-solid fa-right-to-bracket"></i> Entrar';
-                  }
-                });
-            } else {
-              alert('Senha incorreta ou credencial inválida! Tente novamente ou use a senha padrão: Central123');
-              if (submitBtn) {
-                submitBtn.disabled = false;
-                submitBtn.innerHTML = '<i class="fa-solid fa-right-to-bracket"></i> Entrar';
-              }
-            }
-          });
+      // Validação prioritária da senha do servidor ou da senha padrão de primeiro acesso
+      const isValidPassword = (srv.password && password === srv.password) || (!srv.password && password === SENHA_PADRAO_PRIMEIRO_ACESSO) || (password === SENHA_PADRAO_PRIMEIRO_ACESSO);
+
+      if (isValidPassword) {
+        executeLocalLogin();
       } else {
-        // Fallback local se o SDK do Firebase Auth não estiver carregado
-        if (password === SENHA_PADRAO_PRIMEIRO_ACESSO) {
-          executeLocalLogin();
-        } else {
-          alert('Senha incorreta! Use a senha padrão: Central123');
-          if (submitBtn) {
-            submitBtn.disabled = false;
-            submitBtn.innerHTML = '<i class="fa-solid fa-right-to-bracket"></i> Entrar';
-          }
+        alert(`Senha incorreta para o servidor ${srv.nome}! Utilize a sua senha cadastrada ou a senha padrão de primeiro acesso (Central123).`);
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = '<i class="fa-solid fa-right-to-bracket"></i> Entrar';
         }
       }
     }
@@ -4151,6 +4123,7 @@ Deseja confirmar o lançamento mesmo assim?`)) {
       document.getElementById('manage-login-servidor-id').value = srv.id;
       document.getElementById('manage-login-servidor-nome').textContent = `${srv.cargo} ${srv.nome}`;
       document.getElementById('manage-login-input').value = srv.login;
+      document.getElementById('manage-password-input').value = '';
 
       ModalManager.open('modal-manage-login');
     }
@@ -4158,6 +4131,7 @@ Deseja confirmar o lançamento mesmo assim?`)) {
     function saveManagedLogin() {
       const id = document.getElementById('manage-login-servidor-id').value;
       const newLogin = document.getElementById('manage-login-input').value.trim().toLowerCase();
+      const newPassword = document.getElementById('manage-password-input').value.trim();
 
       if (!newLogin) {
         alert('O login não pode ser em branco.');
@@ -4173,11 +4147,15 @@ Deseja confirmar o lançamento mesmo assim?`)) {
       const srv = appState.servidores.find(s => s.id === id);
       if (srv) {
         srv.login = newLogin;
+        if (newPassword) {
+          srv.password = newPassword;
+        }
         saveState();
         renderServidoresTable();
         populateLoginUserSelect();
-        addAuditLog('Alteração de Login', `Login de ${srv.nome} alterado para ${newLogin}`);
+        addAuditLog('Alteração de Credenciais', `Login/Senha de ${srv.nome} atualizados`);
         ModalManager.close('modal-manage-login');
+        alert(`Credenciais do servidor ${srv.nome} atualizadas com sucesso!`);
       }
     }
 
