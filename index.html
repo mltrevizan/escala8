@@ -1688,16 +1688,16 @@
     // Configuração do Projeto Firebase: Escala8
     // IMPORTANTE: Substitua os valores abaixo com as credenciais obtidas no Console do Firebase (Project Settings)
     const firebaseConfig = {
-  apiKey: "AIzaSyBC06RmdZ0Pig7Wf0SFMIpIY4HNseKQ2aY",
-  authDomain: "escala8-c85c0.firebaseapp.com",
-  projectId: "escala8-c85c0",
-  storageBucket: "escala8-c85c0.firebasestorage.app",
-  messagingSenderId: "760563290722",
-  appId: "1:760563290722:web:3ed559094db7ab9eed773b"
-};
+      apiKey: "AIzaSyBC06RmdZ0Pig7Wf0SFMIpIY4HNseKQ2aY",
+      authDomain: "escala8-c85c0.firebaseapp.com",
+      projectId: "escala8-c85c0",
+      storageBucket: "escala8-c85c0.firebasestorage.app",
+      messagingSenderId: "760563290722",
+      appId: "1:760563290722:web:3ed559094db7ab9eed773b"
+    };
 
     // Inicialização do Firebase se as chaves estiverem configuradas
-    if (typeof firebase !== 'undefined' && firebaseConfig.apiKey !== "SUA_API_KEY_AQUI") {
+    if (typeof firebase !== 'undefined') {
       firebase.initializeApp(firebaseConfig);
     }
 
@@ -1973,6 +1973,7 @@
 
 window.addEventListener('DOMContentLoaded', () => {
       loadState();
+      loadStateFromFirestore(() => { renderCurrentProfile(); renderCalendar(); renderServidoresTable(); renderSubdivisoesCards(); renderFeriadosTable(); renderFeriasTable(); renderSobreavisoTable(); renderCentralVigentesTable(); });
 
       // MODO DEV: Garante a criação do usuário Admin padrão se a base estiver limpa
       ensureAdminUserExists();
@@ -2066,6 +2067,40 @@ window.addEventListener('DOMContentLoaded', () => {
 
     function saveState() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
+      syncStateToFirestore();
+    }
+
+    // Função de sincronização com o Cloud Firestore
+    function syncStateToFirestore() {
+      if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
+        const db = firebase.firestore();
+        db.collection('appData').doc('globalState').set(appState)
+          .then(() => console.log('Dados sincronizados com o Cloud Firestore com sucesso!'))
+          .catch(err => console.error('Erro ao sincronizar com Firestore:', err));
+      }
+    }
+
+    // Função para carregar os dados do Cloud Firestore na inicialização
+    function loadStateFromFirestore(callback) {
+      if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
+        const db = firebase.firestore();
+        db.collection('appData').doc('globalState').get()
+          .then(doc => {
+            if (doc.exists) {
+              const remoteData = doc.data();
+              appState = { ...appState, ...remoteData };
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
+              console.log('Dados do Cloud Firestore carregados!');
+            }
+            if (callback) callback();
+          })
+          .catch(err => {
+            console.error('Erro ao buscar do Firestore, mantendo local:', err);
+            if (callback) callback();
+          });
+      } else {
+        if (callback) callback();
+      }
     }
 
     function addAuditLog(acao, detalhes) {
