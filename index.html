@@ -2084,7 +2084,6 @@ window.addEventListener('DOMContentLoaded', () => {
       }
     }
 
-    // Função para carregar os dados do Cloud Firestore na inicialização sem apagar o servidor
     function loadStateFromFirestore(callback) {
       if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
         const db = firebase.firestore();
@@ -2092,7 +2091,7 @@ window.addEventListener('DOMContentLoaded', () => {
           .then(doc => {
             if (doc.exists) {
               const remoteData = doc.data();
-              if (remoteData.servidores && remoteData.servidores.length > 0) {
+              if (remoteData && remoteData.servidores && remoteData.servidores.length > 0) {
                 appState = { ...appState, ...remoteData };
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
                 console.log('Dados do Cloud Firestore carregados com sucesso!');
@@ -4167,13 +4166,19 @@ Deseja confirmar o lançamento mesmo assim?`)) {
         srv.login = newLogin;
         if (newPassword) {
           srv.password = await hashPassword(newPassword);
+          // Sincroniza a nova senha no Firebase Auth se o usuário estiver logado
+          if (typeof firebase !== 'undefined' && firebase.auth && firebase.auth().currentUser) {
+            firebase.auth().currentUser.updatePassword(newPassword).catch(err => {
+              console.log('Senha atualizada na base local/Firestore. Nota do Auth:', err.message);
+            });
+          }
         }
         saveState();
         renderServidoresTable();
         populateLoginUserSelect();
-        addAuditLog('Alteração de Credenciais', `Login/Senha de ${srv.nome} atualizados com hash criptográfico`);
+        addAuditLog('Alteração de Credenciais', `Login/Senha de ${srv.nome} atualizados`);
         ModalManager.close('modal-manage-login');
-        alert(`Credenciais do servidor ${srv.nome} atualizadas e criptografadas com sucesso!`);
+        alert(`Credenciais do servidor ${srv.nome} atualizadas com sucesso!`);
       }
     }
 
