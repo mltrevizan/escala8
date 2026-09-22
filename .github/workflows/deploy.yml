@@ -18,5 +18,5 @@ jobs:
           repoToken: '${{ secrets.GITHUB_TOKEN }}'
           firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_ESCALA8 }}'
           channelId: live
-          projectId: escala8
+          projectId: escala8-c85c0
           firebaseToolsVersion: 13.35.1
