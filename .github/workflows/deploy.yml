@@ -3,7 +3,7 @@ name: Deploy para o Firebase Hosting
 on:
   push:
     branches:
-      - main
+      - main  # Altere para 'master' caso a sua branch no GitHub se chame 'master'
 
 jobs:
   build_and_deploy:
@@ -19,3 +19,4 @@ jobs:
           firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_ESCALA8 }}'
           channelId: live
           projectId: escala8
+          firebaseToolsVersion: 13.35.1
