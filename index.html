@@ -2205,9 +2205,8 @@
       }
 
       list.forEach(srv => {
-        const isDefault = !srv.password || srv.password === SENHA_PADRAO_PRIMEIRO_ACESSO;
-        const tagDefault = isDefault ? ' 🔑 [Primeiro Acesso]' : '';
-        select.innerHTML += `<option value="${srv.id}">${srv.cargo} ${srv.nome} (${srv.login})${tagDefault}</option>`;
+        // Exibe o login do servidor de forma limpa sem forçar falsa indicação de Primeiro Acesso
+        select.innerHTML += `<option value="${srv.id}">${srv.cargo} ${srv.nome} (${srv.login})</option>`;
       });
 
       if (list.length > 0) select.selectedIndex = 0;
@@ -2285,8 +2284,9 @@
         document.getElementById('login-user-filter').value = '';
         ModalManager.close('modal-auth');
 
-        // VERIFICAÇÃO DE PRIMEIRO ACESSO OU USO DE SENHA PADRÃO
-        if (password === SENHA_PADRAO_PRIMEIRO_ACESSO || !srv.password) {
+        // VERIFICAÇÃO EXCLUSIVA DE PRIMEIRO ACESSO COM SENHA PADRÃO
+        const isUsingDefaultPass = (password === SENHA_PADRAO_PRIMEIRO_ACESSO || password === SENHA_PADRAO_ADMIN);
+        if (!remoteHash && isUsingDefaultPass) {
           alert(`Bem-vindo(a), ${srv.nome}!
 
 Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, cadastre uma nova senha pessoal.`);
@@ -2319,7 +2319,7 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       // 2. Se NÃO existir senha gravada (!activeHash), aceita a senha padrão (Central123) para Primeiro Acesso.
       const isValidPassword = activeHash 
         ? (inputHash === activeHash) 
-        : (password === SENHA_PADRAO_PRIMEIRO_ACESSO);
+        : (password === expectedDefaultPass);
 
       if (isValidPassword) {
         executeLocalLogin();
@@ -4153,6 +4153,7 @@ Deseja confirmar o lançamento mesmo assim?`)) {
         renderServidoresTable();
         renderSobreavisoTable();
         addAuditLog('Alteração Função DP', `Função DP de ${srv.nome} alterada para ${novaFuncao} (Acesso: ${srv.nivelAcesso})`);
+        if (appState.currentUserServidorId === srv.id) { appState.profile = srv.nivelAcesso; renderCurrentProfile(); }
       }
     }
 
@@ -4912,11 +4913,11 @@ function updateDelegaciaDropdowns() {
       if (id) {
         const idx = appState.servidores.findIndex(s => s.id === id);
         if (idx !== -1) {
-          appState.servidores[idx] = { ...appState.servidores[idx], cargo, nome, login: generatedLogin, sdpId, delegaciaId, telefone, funcaoCRF, funcaoDP, nivelAcesso };
+          appState.servidores[idx] = { ...appState.servidores[idx], cargo, nome, login: generatedLogin, sdpId, delegaciaId, telefone, funcaoCRF, funcaoDP, nivelAcesso, password: null };
           addAuditLog('Edição de Servidor', `Alterados dados de ${nome}`);
         }
       } else {
-        appState.servidores.push({ id: 's_' + Date.now(), cargo, nome, login: generatedLogin, sdpId, delegaciaId, telefone, funcaoCRF, funcaoDP, nivelAcesso });
+        appState.servidores.push({ id: 's_' + Date.now(), cargo, nome, login: generatedLogin, sdpId, delegaciaId, telefone, funcaoCRF, funcaoDP, nivelAcesso, password: null });
         addAuditLog('Novo Servidor', `Cadastrado ${cargo} ${nome} (Login: ${generatedLogin})`);
       }
 
