@@ -3400,9 +3400,7 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       ModalManager.close('modal-padrao-horarios');
       suggestNextSobreavisoShift();
       alert('Padrões de horários e periodicidade da Delegacia atualizados com sucesso!');
-    } alterada para ${novaFuncao} (Acesso: ${srv.nivelAcesso})`);
-        if (appState.currentUserServidorId === srv.id) { appState.profile = srv.nivelAcesso; renderCurrentProfile(); }
-      }
+    }
     }
 
     function updateServidorAcesso(servidorId, novoAcesso) {
