@@ -1245,7 +1245,7 @@
         </div>
 
         <div class="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-[11px]">
-          <i class="fa-solid fa-circle-info mr-1"></i> Se deixar o campo de senha em branco, a senha padrão (<strong>Central123</strong>) será mantida.
+          <i class="fa-solid fa-circle-info mr-1"></i> Se deixar o campo de senha em branco, a senha padrão de primeiro acesso do servidor será mantida.
         </div>
       </div>
       <div class="p-4 bg-slate-50 border-t border-slate-200 flex justify-between items-center gap-2">
@@ -1702,6 +1702,7 @@
     const DEFAULT_DEV_ADMIN_ID = 'srv_admin_dev';
     const FIREBASE_DOMAIN_SUFFIX = '@escala8-c85c0.firebaseapp.com';
     const SENHA_PADRAO_PRIMEIRO_ACESSO = 'Central123';
+    const SENHA_PADRAO_ADMIN = 'Central321';
 
     // Configuração do Projeto Firebase: Escala8
     // IMPORTANTE: Substitua os valores abaixo com as credenciais obtidas no Console do Firebase (Project Settings)
@@ -2310,16 +2311,20 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       }
 
       const inputHash = await hashPassword(password);
-      const activeHash = remoteHash || srv.password;
+      // A validação usa exclusivamente o documento remoto 'credenciais'
+      const activeHash = remoteHash;
 
-      const isValidPassword = (activeHash && inputHash === activeHash) || 
-                              (!activeHash && password === SENHA_PADRAO_PRIMEIRO_ACESSO) || 
-                              (password === SENHA_PADRAO_PRIMEIRO_ACESSO);
+      // REGRA ESTRITA DE SEGURANÇA:
+      // 1. Se existir senha individualizada na nuvem (activeHash), aceita SOMENTE ela.
+      // 2. Se NÃO existir senha gravada (!activeHash), aceita a senha padrão (Central123) para Primeiro Acesso.
+      const isValidPassword = activeHash 
+        ? (inputHash === activeHash) 
+        : (password === SENHA_PADRAO_PRIMEIRO_ACESSO);
 
       if (isValidPassword) {
         executeLocalLogin();
       } else {
-        alert(`Senha incorreta para o servidor ${srv.nome}! Utilize a sua senha cadastrada ou a senha padrão de primeiro acesso (Central123).`);
+        alert(`Senha incorreta para o servidor ${srv.nome}! Utilize a sua senha cadastrada ou a sua senha padrão de primeiro acesso.`);
         if (submitBtn) {
           submitBtn.disabled = false;
           submitBtn.innerHTML = '<i class="fa-solid fa-right-to-bracket"></i> Entrar';
@@ -4286,7 +4291,8 @@ Deseja confirmar o lançamento mesmo assim?`)) {
         }
       }
 
-      if (confirm(`Confirma o reset da senha do servidor ${srv.nome} para o padrão de primeiro acesso (Central123)?`)) {
+      const targetDefaultPass = (srv.nivelAcesso === 'ADMINISTRADOR' || srv.login === 'admin') ? SENHA_PADRAO_ADMIN : SENHA_PADRAO_PRIMEIRO_ACESSO;
+      if (confirm(`Confirma o reset da senha do servidor ${srv.nome} para a senha padrão de primeiro acesso?`)) {
         srv.password = null; // Reverte no estado local
 
         if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
