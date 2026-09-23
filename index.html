@@ -2109,13 +2109,13 @@
 
       setupTooltipEvents();
 
-      // Garante o modo inicial correto para a Central de Flagrantes (CRF)
+      // Fixa o estado inicial no modo Central
       appState.calendarMode = 'PLANTONISTA';
 
       // Renderização local imediata
       renderAllViews();
 
-      // Carregamento do Firestore sincronizando e redesenhando o calendário
+      // Sincronização em segundo plano via Firestore
       loadStateFromFirestore(() => {
         renderAllViews();
       });
