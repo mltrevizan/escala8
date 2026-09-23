@@ -2637,27 +2637,61 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
 
         let gestaoOptions = '';
 
+        // 1. PLANTÕES UNIFICADOS (COM FILTRAGEM RIGOROSA DE ESCOPO)
         if (appState.plantonsUnificados && appState.plantonsUnificados.length > 0) {
-          gestaoOptions += '<optgroup label="--- PLANTÕES UNIFICADOS ---">';
+          let unifOptions = '';
           appState.plantonsUnificados.forEach(p => {
-            gestaoOptions += `<option value="${p.id}">🤝 ${p.nome.toUpperCase()}</option>`;
+            let canManageUnif = false;
+
+            if (appState.profile === 'ADMINISTRADOR' || scope === 'TODOS') {
+              canManageUnif = true;
+            } else if (appState.profile === 'COORDENADOR' || scope === 'SUBDIVISAO') {
+              // Permite se pelo menos uma delegacia do consórcio pertencer à SDP do Coordenador
+              if (activeUser && p.delegaciasIds) {
+                canManageUnif = p.delegaciasIds.some(dId => {
+                  const delObj = appState.delegacias.find(d => d.id === dId);
+                  return delObj && delObj.sdpId === activeUser.sdpId;
+                });
+              }
+            } else if (scope === 'DELEGACIA' || appState.profile === 'DELEGADO' || appState.profile === 'SUPERINTENDENTE') {
+              // REGRAS RIGOROSAS:
+              // Delegado / Superintendente SÓ PODE gerir se a sua delegacia de lotação fizer parte do consórcio
+              if (activeUser && activeUser.delegaciaId && p.delegaciasIds) {
+                canManageUnif = p.delegaciasIds.includes(activeUser.delegaciaId);
+              }
+            }
+
+            if (canManageUnif) {
+              unifOptions += `<option value="${p.id}">🤝 ${p.nome.toUpperCase()}</option>`;
+            }
           });
-          gestaoOptions += '</optgroup>';
+
+          if (unifOptions) {
+            gestaoOptions += '<optgroup label="--- PLANTÕES UNIFICADOS ---">' + unifOptions + '</optgroup>';
+          }
         }
 
+        // 2. DELEGACIAS INDIVIDUAIS
         if (appState.delegacias && appState.delegacias.length > 0) {
           const isoladas = appState.delegacias.filter(d => !delegaciasConsorciadasIds.has(d.id));
           if (isoladas.length > 0) {
-            gestaoOptions += '<optgroup label="--- DELEGACIAS INDIVIDUAIS ---">';
+            let indOptions = '';
             isoladas.forEach(d => {
               let canAdd = false;
-              if (appState.profile === 'ADMINISTRADOR' || scope === 'TODOS') canAdd = true;
-              else if (scope === 'SUBDIVISAO' && activeUser && d.sdpId === activeUser.sdpId) canAdd = true;
-              else if (scope === 'DELEGACIA' && activeUser && (d.id === activeUser.delegaciaId || (d.delegaciasIds && d.delegaciasIds.includes(activeUser.delegaciaId)))) canAdd = true;
+              if (appState.profile === 'ADMINISTRADOR' || scope === 'TODOS') {
+                canAdd = true;
+              } else if (scope === 'SUBDIVISAO' && activeUser && d.sdpId === activeUser.sdpId) {
+                canAdd = true;
+              } else if (scope === 'DELEGACIA' && activeUser && d.id === activeUser.delegaciaId) {
+                canAdd = true;
+              }
 
-              if (canAdd) gestaoOptions += `<option value="${d.id}">${d.nome.toUpperCase()}</option>`;
+              if (canAdd) indOptions += `<option value="${d.id}">${d.nome.toUpperCase()}</option>`;
             });
-            gestaoOptions += '</optgroup>';
+
+            if (indOptions) {
+              gestaoOptions += '<optgroup label="--- DELEGACIAS INDIVIDUAIS ---">' + indOptions + '</optgroup>';
+            }
           }
         }
 
@@ -3089,6 +3123,23 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       if (!delegaciaId || !inicio || !fim || servidoresIds.length === 0) {
         alert('Preencha os campos obrigatórios e selecione ao menos um policial.');
         return;
+      }
+
+      // Trava de Segurança Estrita de Escopo ao Salvar
+      const activeUser = getActiveUserServidor();
+      const scope = getScopePermission('escopoDP');
+
+      if (appState.profile !== 'ADMINISTRADOR' && scope !== 'TODOS') {
+        if (delegaciaId.startsWith('UNIF_')) {
+          const unifObj = appState.plantonsUnificados ? appState.plantonsUnificados.find(p => p.id === delegaciaId) : null;
+          if (!unifObj || !activeUser || !unifObj.delegaciasIds || !unifObj.delegaciasIds.includes(activeUser.delegaciaId)) {
+            alert('Acesso Negado: Você só pode gerir ou cadastrar escalas para Plantões Unificados nos quais a sua delegacia de lotação seja integrante.');
+            return;
+          }
+        } else if (scope === 'DELEGACIA' && activeUser && delegaciaId !== activeUser.delegaciaId) {
+          alert('Acesso Negado: Você não tem permissão para cadastrar escalas nesta delegacia.');
+          return;
+        }
       }
 
       appState.sobreavisos.push({
