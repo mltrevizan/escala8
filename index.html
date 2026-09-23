@@ -2996,6 +2996,77 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       }
     }
 
+    
+    function handleAssignShiftModal(e) {
+      if (e) e.preventDefault();
+      const date = document.getElementById('assign-date-m').value;
+      const periodo = document.getElementById('assign-period-m').value;
+      const servidorId = document.getElementById('assign-servidor-m').value;
+      const extrajornada = document.getElementById('assign-extrajornada-m').value === 'true';
+
+      if (!date || !servidorId) {
+        alert('Selecione a data e o policial.');
+        return;
+      }
+
+      const srv = appState.servidores.find(s => s.id === servidorId);
+      const exists = appState.escalas.some(sc => sc.data === date && sc.periodo === periodo && sc.servidorId === servidorId);
+      
+      if (exists) {
+        alert('Este policial já está escalado para este mesmo turno/data na Central.');
+        return;
+      }
+
+      appState.escalas.push({
+        id: 'e_' + Date.now(),
+        data: date,
+        periodo: periodo,
+        servidorId: servidorId,
+        extrajornada: extrajornada
+      });
+
+      saveState();
+      renderCalendar();
+      renderCentralVigentesTable();
+      suggestNextCentralShift();
+      addAuditLog('Lançamento Central', `Escalado ${srv ? srv.nome : servidorId} para ${date} (${periodo})`);
+      alert('Plantão salvo com sucesso na Central!');
+    }
+
+    function handleSaveSobreaviso(e) {
+      if (e) e.preventDefault();
+      const delegaciaId = document.getElementById('gestao-sobreaviso-delegacia').value;
+      const modalidade = document.getElementById('sobreaviso-modalidade').value;
+      const inicio = document.getElementById('sobreaviso-inicio').value;
+      const fim = document.getElementById('sobreaviso-fim').value;
+      const viatura = document.getElementById('sobreaviso-viatura').value.trim().toUpperCase();
+      
+      const selectSrvs = document.getElementById('sobreaviso-servidores');
+      const servidoresIds = Array.from(selectSrvs.selectedOptions).map(opt => opt.value);
+
+      if (!delegaciaId || !inicio || !fim || servidoresIds.length === 0) {
+        alert('Preencha os campos obrigatórios e selecione ao menos um policial.');
+        return;
+      }
+
+      appState.sobreavisos.push({
+        id: 'sb_' + Date.now(),
+        delegaciaId,
+        modalidade,
+        inicio,
+        fim,
+        viatura,
+        servidoresIds
+      });
+
+      saveState();
+      renderSobreavisoTable();
+      renderCalendar();
+      suggestNextSobreavisoShift();
+      addAuditLog('Lançamento Delegacia', `Salva escala (${modalidade}) para a delegacia selecionada.`);
+      alert('Escala da Delegacia salva com sucesso!');
+    }
+  
     function setupTooltipEvents() {
       const tooltip = document.getElementById('global-tooltip');
       document.addEventListener('mousemove', (e) => {
@@ -3400,7 +3471,6 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       ModalManager.close('modal-padrao-horarios');
       suggestNextSobreavisoShift();
       alert('Padrões de horários e periodicidade da Delegacia atualizados com sucesso!');
-    }
     }
 
     function updateServidorAcesso(servidorId, novoAcesso) {
