@@ -2105,18 +2105,17 @@
 
       appState.currentUserServidorId = null;
       appState.profile = 'VISUALIZADOR';
+      appState.calendarMode = 'PLANTONISTA';
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(appState)); } catch(e){}
 
       setupTooltipEvents();
 
-      // Garante o modo inicial correto para a Central de Flagrantes (CRF)
-      appState.calendarMode = 'PLANTONISTA';
-
-      // Renderização local imediata
+      // Renderização local inicial garantindo CRF e sem delegacia pré-selecionada
       renderAllViews();
 
-      // Carregamento do Firestore sincronizando e redesenhando o calendário
+      // Sincronização em segundo plano garantindo rigorosamente a vista CRF no arranque do Visualizador
       loadStateFromFirestore(() => {
+        appState.calendarMode = 'PLANTONISTA';
         renderAllViews();
       });
     });
@@ -2134,6 +2133,10 @@
       populateServidorFilters();
       suggestNextCentralShift();
       populateSobreavisoDelegaciaDropdowns(true);
+      
+      if (appState.profile === 'VISUALIZADOR') {
+        appState.calendarMode = 'PLANTONISTA';
+      }
       toggleCalendarMode(appState.calendarMode || 'PLANTONISTA');
     }
 
@@ -2375,7 +2378,7 @@
           const selectGestaoDel = document.getElementById('gestao-sobreaviso-delegacia');
           const selectFilterDel = document.getElementById('filter-delegacia-mode');
           if (selectGestaoDel) selectGestaoDel.value = targetId;
-          if (selectFilterDel) selectFilterDel.value = targetId;
+          if (selectFilterDel && appState.calendarMode === 'DELEGACIA') selectFilterDel.value = targetId;
         }
 
         if (srv.sdpId) {
@@ -2556,6 +2559,11 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       const modeTitle = document.getElementById('calendar-mode-title');
 
       if (mode === 'DELEGACIA') {
+        const selectHeader = document.getElementById('filter-delegacia-mode');
+        if (selectHeader && (!selectHeader.value || selectHeader.value === '')) {
+          const firstValidOpt = Array.from(selectHeader.options).find(opt => opt.value && opt.value !== '');
+          if (firstValidOpt) selectHeader.value = firstValidOpt.value;
+        }
         btnDelegacia.classList.add('hidden');
         btnCentral.classList.remove('hidden');
         boxFilterSdp.classList.add('hidden');
@@ -2597,7 +2605,7 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
         });
       }
 
-      let optionsHTML = '';
+      let optionsHTML = '<option value="" selected disabled>-- SELECIONE UMA DELEGACIA --</option>';
 
       // 1. Plantões Unificados (Prioridade no topo)
       if (appState.plantonsUnificados && appState.plantonsUnificados.length > 0) {
@@ -5628,8 +5636,18 @@ function findServidorByApproxName(rawName) {
       const delId = document.getElementById('gen-del-id').value;
       if (!delId) return;
 
+      let targetDelegaciasIds = [];
+      if (delId.startsWith('UNIF_')) {
+        const unifObj = appState.plantonsUnificados ? appState.plantonsUnificados.find(p => p.id === delId) : null;
+        if (unifObj && unifObj.delegaciasIds) {
+          targetDelegaciasIds = unifObj.delegaciasIds;
+        }
+      } else {
+        targetDelegaciasIds = [delId];
+      }
+
       let servidoresUnidade = appState.servidores.filter(s => 
-        s.delegaciaId === delId && (s.funcaoDP || 'PLANTONISTA') !== 'NÃO PARTICIPA'
+        targetDelegaciasIds.includes(s.delegaciaId) && (s.funcaoDP || 'PLANTONISTA') !== 'NÃO PARTICIPA'
       );
 
       if (textFilter) {
