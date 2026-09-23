@@ -1197,16 +1197,12 @@
       </div>
       <div class="p-5 space-y-4 text-xs">
         <!-- BALÃO 1: SOBREAVISO -->
-        <div class="space-y-2 bg-slate-50 p-3 rounded-lg border">
-          <span class="font-bold text-slate-800 block uppercase border-b pb-1">1. SOBREAVISO:</span>
-          <div class="grid grid-cols-2 gap-2">
-            <div>
-              <label class="block text-slate-600 mb-0.5">Hora Inicial:</label>
-              <input type="time" id="padrao-hora-sobreaviso" value="09:00" class="w-full border rounded p-1 font-bold">
-            </div>
-            <div>
-              <label class="block text-slate-600 mb-0.5">Periodicidade (Horas):</label>
-              <select id="padrao-periodicidade-horas" class="w-full border rounded p-1 font-bold text-indigo-700">
+        <div class="space-y-3 bg-slate-50 p-3 rounded-lg border">
+          <div class="flex justify-between items-center border-b pb-1">
+            <span class="font-bold text-slate-800 uppercase">1. SOBREAVISO:</span>
+            <div class="flex items-center gap-1">
+              <label class="text-[10px] font-bold text-slate-600 uppercase">Periodicidade:</label>
+              <select id="padrao-periodicidade-horas" class="border rounded p-0.5 text-xs font-bold text-indigo-700">
                 <option value="24">24 HORAS (1 Dia)</option>
                 <option value="48">48 HORAS (2 Dias)</option>
                 <option value="72" selected>72 HORAS (3 Dias)</option>
@@ -1215,6 +1211,34 @@
                 <option value="144">144 HORAS (6 Dias)</option>
                 <option value="168">168 HORAS (7 Dias)</option>
               </select>
+            </div>
+          </div>
+
+          <div class="space-y-1">
+            <span class="text-[10px] font-bold text-slate-500 block uppercase">Dias Úteis:</span>
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="block text-slate-600">Entrada:</label>
+                <input type="time" id="padrao-hora-sobreaviso-util-in" value="17:00" class="w-full border rounded p-1 font-bold">
+              </div>
+              <div>
+                <label class="block text-slate-600">Saída:</label>
+                <input type="time" id="padrao-hora-sobreaviso-util-out" value="09:00" class="w-full border rounded p-1 font-bold">
+              </div>
+            </div>
+          </div>
+
+          <div class="space-y-1">
+            <span class="text-[10px] font-bold text-slate-500 block uppercase">Fim de Semana / Feriado:</span>
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="block text-slate-600">Entrada:</label>
+                <input type="time" id="padrao-hora-sobreaviso-fds-in" value="09:00" class="w-full border rounded p-1 font-bold">
+              </div>
+              <div>
+                <label class="block text-slate-600">Saída:</label>
+                <input type="time" id="padrao-hora-sobreaviso-fds-out" value="09:00" class="w-full border rounded p-1 font-bold">
+              </div>
             </div>
           </div>
         </div>
@@ -1864,13 +1888,17 @@
       currentMonth: 8,
       calendarMode: 'PLANTAO',
       padroesHorarios: {
-        sobreavisoHoraIn: '09:00',
-        periodicidadeHoras: 72,
-        periodicidadePlantaoHoras: 24,
-        plantaoUtilIn: '17:00',
-        plantaoUtilOut: '09:00',
-        plantaoFdsIn: '17:00',
-        plantaoFdsOut: '17:00'
+        sobreavisoHoraIn: '00:00',
+        sobreavisoUtilIn: '00:00',
+        sobreavisoUtilOut: '00:00',
+        sobreavisoFdsIn: '00:00',
+        sobreavisoFdsOut: '00:00',
+        periodicidadeHoras: 0,
+        periodicidadePlantaoHoras: 0,
+        plantaoUtilIn: '00:00',
+        plantaoUtilOut: '00:00',
+        plantaoFdsIn: '00:00',
+        plantaoFdsOut: '00:00'
       },
       sdps: [],
       delegacias: [],
@@ -2638,12 +2666,27 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
         if (maxFimStr) nextStartDateObj = new Date(maxFimStr);
       }
 
-      const p = appState.padroesHorarios;
+      // Exceção exclusiva para a 8ª SDP Paranavaí
+      const isParanavai = (selectedDelId === 'DEL_8SDP_P');
+      const p = isParanavai ? {
+        sobreavisoHoraIn: '09:00',
+        sobreavisoUtilIn: '17:00',
+        sobreavisoUtilOut: '09:00',
+        sobreavisoFdsIn: '09:00',
+        sobreavisoFdsOut: '09:00',
+        plantaoUtilIn: '17:00',
+        plantaoUtilOut: '09:00',
+        plantaoFdsIn: '17:00',
+        plantaoFdsOut: '17:00'
+      } : appState.padroesHorarios;
 
-      let horaIn = p.sobreavisoHoraIn;
+      const isFds = isNonWorkDay(nextStartDateObj, selectedDelId);
+
+      let horaIn = '00:00';
       if (mod === 'PLANTONISTA') {
-        const isFds = isNonWorkDay(nextStartDateObj);
-        horaIn = isFds ? (p.plantaoFdsIn || '17:00') : (p.plantaoUtilIn || '17:00');
+        horaIn = isFds ? (p.plantaoFdsIn || '00:00') : (p.plantaoUtilIn || '00:00');
+      } else {
+        horaIn = isFds ? (p.sobreavisoFdsIn || p.sobreavisoHoraIn || '00:00') : (p.sobreavisoUtilIn || '00:00');
       }
 
       const yearStr = nextStartDateObj.getFullYear();
@@ -2664,24 +2707,43 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       const startDateObj = new Date(inVal);
       if (isNaN(startDateObj.getTime())) return;
 
+      const delSelect = document.getElementById('gestao-sobreaviso-delegacia');
+      const selectedDelId = delSelect ? delSelect.value : null;
+
       const mod = document.getElementById('sobreaviso-modalidade').value;
-      const p = appState.padroesHorarios;
+      const isParanavai = (selectedDelId === 'DEL_8SDP_P');
+      const p = isParanavai ? {
+        sobreavisoHoraIn: '09:00',
+        sobreavisoUtilIn: '17:00',
+        sobreavisoUtilOut: '09:00',
+        sobreavisoFdsIn: '09:00',
+        sobreavisoFdsOut: '09:00',
+        periodicidadeHoras: 72,
+        periodicidadePlantaoHoras: 24,
+        plantaoUtilIn: '17:00',
+        plantaoUtilOut: '09:00',
+        plantaoFdsIn: '17:00',
+        plantaoFdsOut: '17:00'
+      } : appState.padroesHorarios;
 
       if (mod === 'SOBREAVISO') {
-        const hoursToAdd = parseInt(p.periodicidadeHoras || (p.periodicidadeDias ? p.periodicidadeDias * 24 : 72)) || 72;
+        const hoursToAdd = parseInt(p.periodicidadeHoras) || 0;
         const endDateObj = new Date(startDateObj.getTime() + (hoursToAdd * 60 * 60 * 1000));
-        
+        const isFimNonWork = isNonWorkDay(endDateObj, selectedDelId);
+
+        let horaOut = isFimNonWork ? (p.sobreavisoFdsOut || p.sobreavisoHoraIn || '00:00') : (p.sobreavisoUtilOut || '00:00');
+
         const yearStr = endDateObj.getFullYear();
         const monthStr = String(endDateObj.getMonth() + 1).padStart(2, '0');
         const dayStr = String(endDateObj.getDate()).padStart(2, '0');
         const outInput = document.getElementById('sobreaviso-fim');
-        if (outInput) outInput.value = `${yearStr}-${monthStr}-${dayStr}T${p.sobreavisoHoraIn || '09:00'}`;
+        if (outInput) outInput.value = `${yearStr}-${monthStr}-${dayStr}T${horaOut}`;
       } else {
-        const hoursToAdd = parseInt(p.periodicidadePlantaoHoras) || 24;
+        const hoursToAdd = parseInt(p.periodicidadePlantaoHoras) || 0;
         const endDateObj = new Date(startDateObj.getTime() + (hoursToAdd * 60 * 60 * 1000));
 
-        const isFimNonWork = isNonWorkDay(endDateObj);
-        let horaOut = isFimNonWork ? (p.plantaoFdsOut || '17:00') : (p.plantaoUtilOut || '09:00');
+        const isFimNonWork = isNonWorkDay(endDateObj, selectedDelId);
+        let horaOut = isFimNonWork ? (p.plantaoFdsOut || '00:00') : (p.plantaoUtilOut || '00:00');
 
         const yearStr = endDateObj.getFullYear();
         const monthStr = String(endDateObj.getMonth() + 1).padStart(2, '0');
@@ -2719,7 +2781,6 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       }
     }
 
-    
     function onModalidadeChangeDelegacia() {
       applyDefaultHoursToForm();
       populateServidoresDelegaciaForm();
@@ -3323,983 +3384,23 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
 
     function savePadraoHorarios() {
       appState.padroesHorarios = {
-        sobreavisoHoraIn: document.getElementById('padrao-hora-sobreaviso').value,
-        periodicidadeHoras: parseInt(document.getElementById('padrao-periodicidade-horas').value) || 72,
-        periodicidadePlantaoHoras: parseInt(document.getElementById('padrao-periodicidade-plantao-horas').value) || 24,
-        plantaoUtilIn: document.getElementById('padrao-hora-plantao-util-in').value,
-        plantaoUtilOut: document.getElementById('padrao-hora-plantao-util-out').value,
-        plantaoFdsIn: document.getElementById('padrao-hora-plantao-fds-in').value,
-        plantaoFdsOut: document.getElementById('padrao-hora-plantao-fds-out').value
+        sobreavisoHoraIn: document.getElementById('padrao-hora-sobreaviso-fds-in')?.value || '00:00',
+        sobreavisoUtilIn: document.getElementById('padrao-hora-sobreaviso-util-in')?.value || '00:00',
+        sobreavisoUtilOut: document.getElementById('padrao-hora-sobreaviso-util-out')?.value || '00:00',
+        sobreavisoFdsIn: document.getElementById('padrao-hora-sobreaviso-fds-in')?.value || '00:00',
+        sobreavisoFdsOut: document.getElementById('padrao-hora-sobreaviso-fds-out')?.value || '00:00',
+        periodicidadeHoras: parseInt(document.getElementById('padrao-periodicidade-horas')?.value) || 0,
+        periodicidadePlantaoHoras: parseInt(document.getElementById('padrao-periodicidade-plantao-horas')?.value) || 0,
+        plantaoUtilIn: document.getElementById('padrao-hora-plantao-util-in')?.value || '00:00',
+        plantaoUtilOut: document.getElementById('padrao-hora-plantao-util-out')?.value || '00:00',
+        plantaoFdsIn: document.getElementById('padrao-hora-plantao-fds-in')?.value || '00:00',
+        plantaoFdsOut: document.getElementById('padrao-hora-plantao-fds-out')?.value || '00:00'
       };
       saveState();
       ModalManager.close('modal-padrao-horarios');
       suggestNextSobreavisoShift();
       alert('Padrões de horários e periodicidade da Delegacia atualizados com sucesso!');
-    }
-
-    function editSobreaviso(id) {
-      const sb = appState.sobreavisos.find(s => s.id === id);
-      if (!sb) return;
-
-      const activeUser = getActiveUserServidor();
-      const scope = getScopePermission('escopoDP');
-      const targetDel = appState.delegacias.find(d => d.id === sb.delegaciaId);
-
-      let allowed = (scope === 'TODOS');
-      if (scope === 'SUBDIVISAO' && activeUser && targetDel && activeUser.sdpId === targetDel.sdpId) allowed = true;
-      if (scope === 'DELEGACIA' && activeUser && activeUser.delegaciaId === sb.delegaciaId) allowed = true;
-
-      if (!allowed) {
-        alert('Você não tem permissão para editar lançamentos desta delegacia.');
-        return;
-      }
-
-      document.getElementById('sobreaviso-id').value = sb.id;
-      document.getElementById('gestao-sobreaviso-delegacia').value = sb.delegaciaId;
-      document.getElementById('sobreaviso-modalidade').value = sb.modalidade || 'SOBREAVISO';
-      document.getElementById('sobreaviso-inicio').value = sb.inicio;
-      document.getElementById('sobreaviso-fim').value = sb.fim;
-      document.getElementById('sobreaviso-viatura').value = sb.viatura || '';
-
-      populateServidoresDelegaciaForm();
-
-      const selectSrv = document.getElementById('sobreaviso-servidores');
-      if (selectSrv) {
-        Array.from(selectSrv.options).forEach(opt => {
-          opt.selected = sb.servidoresIds.includes(opt.value);
-        });
-      }
-
-      const btnSubmit = document.querySelector('#form-add-sobreaviso button[type="submit"]');
-      if (btnSubmit) btnSubmit.textContent = 'Atualizar Escala na Delegacia';
-
-      document.getElementById('form-add-sobreaviso')?.scrollIntoView({ behavior: 'smooth' });
-    }
-
-    function handleSaveSobreaviso(e) {
-      e.preventDefault();
-      const sbId = document.getElementById('sobreaviso-id')?.value;
-      const delegaciaId = document.getElementById('gestao-sobreaviso-delegacia').value;
-      
-      const activeUser = getActiveUserServidor();
-      const scope = getScopePermission('escopoDP');
-      const targetDel = appState.delegacias.find(d => d.id === delegaciaId);
-
-      let allowed = (scope === 'TODOS');
-      if (scope === 'SUBDIVISAO' && activeUser && targetDel && activeUser.sdpId === targetDel.sdpId) allowed = true;
-      if (scope === 'DELEGACIA' && activeUser && activeUser.delegaciaId === delegaciaId) allowed = true;
-
-      if (!allowed) {
-        alert('Você não tem permissão para alterar a escala desta delegacia.');
-        return;
-      }
-      const modalidade = document.getElementById('sobreaviso-modalidade').value;
-      const inicio = document.getElementById('sobreaviso-inicio').value;
-      const fim = document.getElementById('sobreaviso-fim').value;
-      const viatura = document.getElementById('sobreaviso-viatura').value.trim().toUpperCase();
-      
-      const selectSrv = document.getElementById('sobreaviso-servidores');
-      const selectedSrvIds = Array.from(selectSrv.selectedOptions).map(o => o.value);
-
-      if (!delegaciaId || !inicio || !fim || selectedSrvIds.length === 0) {
-        alert('Preencha as datas de início, fim e selecione ao menos um servidor.');
-        return;
-      }
-
-      if (inicio >= fim) {
-        alert('A data/hora final deve ser posterior à data/hora inicial.');
-        return;
-      }
-
-      const startD = inicio.substring(0, 10);
-      const endD = fim.substring(0, 10);
-      for (const sId of selectedSrvIds) {
-        const feriasConflict = checkFeriasConflict(sId, startD, endD);
-        if (feriasConflict) {
-          const srv = appState.servidores.find(s => s.id === sId);
-          const srvName = srv ? srv.nome : 'Selecionado';
-          const [yI, mI, dI] = feriasConflict.inicio.split('-');
-          const [yF, mF, dF] = feriasConflict.fim.split('-');
-          if (!confirm(`ATENÇÃO: O servidor ${srvName} está cadastrado em FÉRIAS (${dI}/${mI}/${yI} a ${dF}/${mF}/${yF}).
-
-Deseja confirmar o lançamento mesmo assim?`)) {
-            return;
-          }
-        }
-      }
-
-      if (sbId) {
-        const idx = appState.sobreavisos.findIndex(s => s.id === sbId);
-        if (idx !== -1) {
-          appState.sobreavisos[idx] = { ...appState.sobreavisos[idx], delegaciaId, modalidade, inicio, fim, viatura, servidoresIds: selectedSrvIds };
-          addAuditLog('Edição Delegacia', `Atualizado ${modalidade} (${sbId}) em ${inicio} a ${fim}`);
-        }
-        document.getElementById('sobreaviso-id').value = '';
-        const btnSubmit = document.querySelector('#form-add-sobreaviso button[type="submit"]');
-        if (btnSubmit) btnSubmit.textContent = 'Salvar Escala na Delegacia';
-      } else {
-        appState.sobreavisos.push({ id: 'sb_' + Date.now(), delegaciaId, modalidade, inicio, fim, viatura, servidoresIds: selectedSrvIds });
-        addAuditLog('Gestão da Delegacia', `Adicionado ${modalidade} para ${selectedSrvIds.length} servidores em ${inicio} a ${fim}`);
-      }
-
-      saveState();
-      renderSobreavisoTable();
-      renderFeriasTable();
-      renderCalendar();
-      suggestNextSobreavisoShift();
-      alert(sbId ? 'Lançamento da Delegacia atualizado com sucesso!' : 'Registro da Delegacia cadastrado com sucesso!');
-    }
-
-    function deleteSobreaviso(id) {
-      const sb = appState.sobreavisos.find(s => s.id === id);
-      if (sb) {
-        const activeUser = getActiveUserServidor();
-        const scope = getScopePermission('escopoDP');
-        const targetDel = appState.delegacias.find(d => d.id === sb.delegaciaId);
-
-        let allowed = (scope === 'TODOS');
-        if (scope === 'SUBDIVISAO' && activeUser && targetDel && activeUser.sdpId === targetDel.sdpId) allowed = true;
-        if (scope === 'DELEGACIA' && activeUser && activeUser.delegaciaId === sb.delegaciaId) allowed = true;
-
-        if (!allowed) {
-          alert('Você não tem permissão para excluir lançamentos desta delegacia.');
-          return;
-        }
-      }
-      if (confirm('Deseja excluir este registro da Delegacia?')) {
-        appState.sobreavisos = appState.sobreavisos.filter(sb => sb.id !== id);
-        saveState();
-        renderSobreavisoTable();
-        renderCalendar();
-        suggestNextSobreavisoShift();
-      }
-    }
-
-    function purgeEscalaDelegaciaFromDate() {
-      const selectedDelId = document.getElementById('gestao-sobreaviso-delegacia')?.value;
-      const dateStr = document.getElementById('purge-delegacia-from-date').value;
-
-      if (!selectedDelId || !dateStr) {
-        alert('Selecione a delegacia e a data limite.');
-        return;
-      }
-
-      const activeUser = getActiveUserServidor();
-      const scope = getScopePermission('escopoDP');
-      const targetDel = appState.delegacias.find(d => d.id === selectedDelId);
-
-      let allowed = (scope === 'TODOS');
-      if (scope === 'SUBDIVISAO' && activeUser && targetDel && activeUser.sdpId === targetDel.sdpId) allowed = true;
-      if (scope === 'DELEGACIA' && activeUser && activeUser.delegaciaId === selectedDelId) allowed = true;
-
-      if (!allowed) {
-        alert('Você não tem permissão para excluir lançamentos desta delegacia.');
-        return;
-      }
-
-      const delObj = appState.delegacias.find(d => d.id === selectedDelId);
-      const delNome = delObj ? delObj.nome : selectedDelId;
-
-      if (confirm(`Confirma a exclusão de TODOS os lançamentos da delegacia "${delNome}" a partir do dia ${dateStr}?`)) {
-        const initialCount = appState.sobreavisos.length;
-        appState.sobreavisos = appState.sobreavisos.filter(sb => !(sb.delegaciaId === selectedDelId && sb.inicio.substring(0, 10) >= dateStr));
-        const removedCount = initialCount - appState.sobreavisos.length;
-
-        saveState();
-        renderSobreavisoTable();
-        renderCalendar();
-        addAuditLog('Exclusão Parcial Delegacia', `Removidos ${removedCount} lançamentos da unidade ${delNome} a partir de ${dateStr}`);
-        suggestNextSobreavisoShift();
-        alert(`Sucesso! ${removedCount} lançamentos removidos.`);
-      }
-    }
-
-    function confirmPurgeEscalaDelegacia() {
-      const selectedDelId = document.getElementById('gestao-sobreaviso-delegacia')?.value;
-      if (!selectedDelId) return;
-
-      const activeUser = getActiveUserServidor();
-      const scope = getScopePermission('escopoDP');
-      const targetDel = appState.delegacias.find(d => d.id === selectedDelId);
-
-      let allowed = (appState.profile === 'ADMINISTRADOR' || scope === 'TODOS');
-      if (scope === 'SUBDIVISAO' && activeUser && targetDel && activeUser.sdpId === targetDel.sdpId) allowed = true;
-      if (scope === 'DELEGACIA' && activeUser && activeUser.delegaciaId === selectedDelId) allowed = true;
-
-      if (!allowed) {
-        alert('Você não tem permissão para excluir a escala desta delegacia.');
-        return;
-      }
-
-      const delNome = targetDel ? targetDel.nome : selectedDelId;
-
-      if (confirm(`ATENÇÃO: Deseja zerar toda a escala da delegacia "${delNome}"?`)) {
-        const initialCount = appState.sobreavisos.length;
-        appState.sobreavisos = appState.sobreavisos.filter(sb => sb.delegaciaId !== selectedDelId);
-        const removedCount = initialCount - appState.sobreavisos.length;
-
-        saveState();
-        renderSobreavisoTable();
-        renderCalendar();
-        addAuditLog('Exclusão Total Delegacia', `Limpa toda a escala da unidade ${delNome}`);
-        suggestNextSobreavisoShift();
-        alert(`Escala zerada! (${removedCount} registros removidos)`);
-      }
-    }
-
-    function populateServidoresDelegaciaForm() {
-      const delSelect = document.getElementById('gestao-sobreaviso-delegacia');
-      const srvSelect = document.getElementById('sobreaviso-servidores');
-      const modSelect = document.getElementById('sobreaviso-modalidade');
-      if (!delSelect || !srvSelect) return;
-
-      const selectedDelId = delSelect.value;
-      const selectedMod = modSelect ? modSelect.value : 'PLANTONISTA';
-
-      srvSelect.innerHTML = '';
-
-      // Verifica se é um Plantão Unificado / Consórcio
-      const consorcioObj = appState.plantonsUnificados ? appState.plantonsUnificados.find(p => p.id === selectedDelId) : null;
-      let targetDelIds = consorcioObj ? consorcioObj.delegaciasIds : [selectedDelId];
-
-      const servidoresDaDelegacia = appState.servidores.filter(s => 
-        targetDelIds.includes(s.delegaciaId) && (s.funcaoDP || 'PLANTONISTA') !== 'NÃO PARTICIPA'
-      );
-
-      if (servidoresDaDelegacia.length === 0) {
-        srvSelect.innerHTML = '<option value="" disabled>Nenhum servidor participante nesta unidade ou consórcio</option>';
-        return;
-      }
-
-      const prioridade = servidoresDaDelegacia.filter(s => (s.funcaoDP || 'PLANTONISTA') === selectedMod);
-      const demais = servidoresDaDelegacia.filter(s => (s.funcaoDP || 'PLANTONISTA') !== selectedMod);
-
-      if (prioridade.length > 0) {
-        const optgroupP = document.createElement('optgroup');
-        optgroupP.label = `--- SERVIDORES QUE ATUAM COMO ${selectedMod} ---`;
-        prioridade.forEach(s => {
-          optgroupP.innerHTML += `<option value="${s.id}">${getServidorDisplayName(s)} (${s.funcaoDP || 'PLANTONISTA'})</option>`;
-        });
-        srvSelect.appendChild(optgroupP);
-      }
-
-      if (demais.length > 0) {
-        const optgroupD = document.createElement('optgroup');
-        optgroupD.label = `--- DEMAIS SERVIDORES DA UNIDADE/CONSÓRCIO ---`;
-        demais.forEach(s => {
-          optgroupD.innerHTML += `<option value="${s.id}">${getServidorDisplayName(s)} (${s.funcaoDP || 'PLANTONISTA'})</option>`;
-        });
-        srvSelect.appendChild(optgroupD);
-      }
-    }
-
-    function renderSobreavisoTable() {
-      const delSelect = document.getElementById('gestao-sobreaviso-delegacia');
-      if (!delSelect) return;
-
-      const selectedDelId = delSelect.value;
-      const filterText = document.getElementById('filter-sobreaviso-vigentes')?.value || '';
-
-      populateServidoresDelegaciaForm();
-
-      let list = appState.sobreavisos.filter(sb => sb.delegaciaId === selectedDelId);
-
-      // Ordenar Plantonistas antes de Sobreaviso
-      list.sort((a, b) => {
-        const modA = a.modalidade || 'SOBREAVISO';
-        const modB = b.modalidade || 'SOBREAVISO';
-        if (modA === 'PLANTONISTA' && modB !== 'PLANTONISTA') return -1;
-        if (modA !== 'PLANTONISTA' && modB === 'PLANTONISTA') return 1;
-        return b.inicio.localeCompare(a.inicio);
-      });
-
-      if (filterText) {
-        const normFilter = normalizeText(filterText);
-        list = list.filter(sb => {
-          const srvNames = sb.servidoresIds.map(id => {
-            const s = appState.servidores.find(srv => srv.id === id);
-            return s ? `${s.cargo} ${s.nome} ${s.login}` : '';
-          }).join(' ');
-          const fullText = normalizeText(`${sb.modalidade} ${sb.inicio} ${sb.fim} ${sb.viatura} ${srvNames}`);
-          return fullText.includes(normFilter);
-        });
-      }
-
-      renderTableGeneric('sobreaviso-table-body', list, (sb) => {
-        const srvNames = sb.servidoresIds.map(id => {
-          const s = appState.servidores.find(srv => srv.id === id);
-          return s ? getServidorDisplayName(s) : id;
-        }).join(', ');
-
-        const formatDT = (dt) => {
-          if (!dt) return '-';
-          const [d, t] = dt.split('T');
-          const [y, m, day] = d.split('-');
-          return `${day}/${m}/${y} ${t}`;
-        };
-
-        return `
-          <td class="py-2 px-3 font-bold text-slate-800">${sb.modalidade || 'SOBREAVISO'}</td>
-          <td class="py-2 px-3 text-emerald-800 font-bold">${formatDT(sb.inicio)}</td>
-          <td class="py-2 px-3 text-emerald-800 font-bold">${formatDT(sb.fim)}</td>
-          <td class="py-2 px-3 font-semibold text-slate-800">${srvNames}</td>
-          <td class="py-2 px-3 font-mono text-slate-600">${sb.viatura || '-'}</td>
-          <td class="py-2 px-3 text-center space-x-1">
-            <button onclick="editSobreaviso('${sb.id}')" class="text-indigo-600 hover:text-indigo-800 font-bold" title="Editar Lançamento"><i class="fa-solid fa-pen-to-square"></i></button>
-            <button onclick="deleteSobreaviso('${sb.id}')" class="text-red-600 hover:text-red-800 font-bold" title="Excluir Lançamento"><i class="fa-solid fa-trash"></i></button>
-          </td>
-        `;
-      }, 'Nenhum registro encontrado.');
-    }
-
-    function renderCentralVigentesTable() {
-      const filterText = normalizeText(document.getElementById('filter-central-vigentes')?.value || '');
-      let list = appState.escalas.filter(e => {
-        if (!filterText) return true;
-        const srv = appState.servidores.find(s => s.id === e.servidorId);
-        const del = srv ? appState.delegacias.find(d => d.id === srv.delegaciaId) : null;
-        const sdp = srv ? appState.sdps.find(s => s.id === srv.sdpId) : null;
-        const [y, m, d] = e.data.split('-');
-        const dataBr = `${d}/${m}/${y}`;
-        const fullText = normalizeText(`${dataBr} ${e.data} ${e.periodo} ${e.extrajornada ? 'extra extrajornada' : 'regular ordinario'} ${srv ? srv.nome : ''} ${srv ? srv.cargo : ''} ${srv ? srv.login : ''} ${del ? del.nome : ''} ${sdp ? sdp.nome : ''}`);
-        return fullText.includes(filterText);
-      });
-      list.sort((a, b) => b.data.localeCompare(a.data));
-
-      renderTableGeneric('central-vigentes-table-body', list, (e) => {
-        const srv = appState.servidores.find(s => s.id === e.servidorId);
-        const del = srv ? appState.delegacias.find(d => d.id === srv.delegaciaId) : null;
-        const [y, m, d] = e.data.split('-');
-
-        return `
-          <td class="py-2 px-3 font-bold text-slate-800">${d}/${m}/${y}</td>
-          <td class="py-2 px-3 font-bold ${e.periodo === 'DIURNO' ? 'text-amber-800' : 'text-indigo-800'}">${e.periodo}</td>
-          <td class="py-2 px-3"><span class="px-2 py-0.5 rounded text-[9px] font-bold ${e.extrajornada ? 'bg-purple-100 text-purple-800' : 'bg-slate-200 text-slate-700'}">${e.extrajornada ? 'EXTRA' : 'REGULAR'}</span></td>
-          <td class="py-2 px-3 font-bold text-slate-800">${srv ? getServidorDisplayName(srv) : '-'}</td>
-          <td class="py-2 px-3 text-slate-600">${del ? del.nome.toUpperCase() : '-'}</td>
-          <td class="py-2 px-3 text-center space-x-1">
-            <button onclick="editCentralPlantao('${e.id}')" class="text-indigo-600 hover:text-indigo-800 font-bold" title="Editar Lançamento"><i class="fa-solid fa-pen-to-square"></i></button>
-            <button onclick="deleteCentralPlantao('${e.id}')" class="text-red-600 hover:text-red-800 font-bold" title="Excluir Lançamento"><i class="fa-solid fa-trash"></i></button>
-          </td>
-        `;
-      }, 'Nenhum lançamento encontrado na Central.');
-    }
-
-    
-    function openVincularApjModal() {
-      const todayStr = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}`;
-      const startDateInput = document.getElementById('vincular-start-date');
-      if (startDateInput && !startDateInput.value) startDateInput.value = todayStr;
-
-      renderVincularApjTable();
-      ModalManager.open('modal-vincular-apj');
-    }
-
-    function renderVincularApjTable() {
-      const startDate = document.getElementById('vincular-start-date')?.value || '';
-      const isExtra = document.getElementById('vincular-extrajornada-select')?.value === 'true';
-      const countBadge = document.getElementById('vincular-count-badge');
-
-      let plantoesAgrupados = new Map();
-
-      appState.escalas.forEach(e => {
-        if (startDate && e.data < startDate) return;
-        if (!!e.extrajornada !== isExtra) return;
-
-        const key = `${e.data}_${e.periodo}`;
-        if (!plantoesAgrupados.has(key)) {
-          plantoesAgrupados.set(key, { data: e.data, periodo: e.periodo, delegados: [], apjs: [] });
-        }
-
-        const group = plantoesAgrupados.get(key);
-        const srv = appState.servidores.find(s => s.id === e.servidorId);
-        if (srv) {
-          if (srv.cargo === 'DELEGADO') group.delegados.push(srv);
-          else if (srv.cargo === 'APJ') group.apjs.push(srv);
-        }
-      });
-
-      let lacunas = [];
-      plantoesAgrupados.forEach(group => {
-        if (group.delegados.length > 0 && group.apjs.length === 0) {
-          group.delegados.forEach(del => {
-            lacunas.push({ data: group.data, periodo: group.periodo, delegado: del });
-          });
-        }
-      });
-
-      lacunas.sort((a, b) => {
-        const compData = a.data.localeCompare(b.data);
-        if (compData !== 0) return compData;
-        return a.periodo === 'DIURNO' ? -1 : 1;
-      });
-
-      if (countBadge) countBadge.textContent = `${lacunas.length} lacunas pendentes de APJ`;
-
-      renderTableGeneric('vincular-apj-tbody', lacunas, (lacuna) => {
-        const del = lacuna.delegado;
-        const delUnit = appState.delegacias.find(d => d.id === del.delegaciaId);
-        const [y, m, d] = lacuna.data.split('-');
-        const rowId = `vinc_${lacuna.data}_${lacuna.periodo}_${del.id}`;
-
-        let optionsHTML = '<option value="">-- Selecione o APJ a Vincular --</option>';
-
-        const apjsMesmaDel = appState.servidores.filter(s => s.cargo === 'APJ' && s.delegaciaId === del.delegaciaId);
-        const apjsOutrasDel = appState.servidores.filter(s => s.cargo === 'APJ' && s.delegaciaId !== del.delegaciaId);
-
-        if (apjsMesmaDel.length > 0) {
-          optionsHTML += `<optgroup label="--- APJs DA MESMA DELEGACIA (${delUnit ? delUnit.nome.toUpperCase() : ''}) ---">`;
-          apjsMesmaDel.forEach(apj => {
-            const isFerias = checkFeriasConflict(apj.id, lacuna.data, lacuna.data);
-            const isEscalado = appState.escalas.some(e => e.data === lacuna.data && e.periodo === lacuna.periodo && e.servidorId === apj.id);
-            const warnText = isFerias ? ' ⚠️ [FÉRIAS]' : isEscalado ? ' ⚠️ [JÁ ESCALADO]' : '';
-            optionsHTML += `<option value="${apj.id}">${getServidorDisplayName(apj)}${warnText}</option>`;
-          });
-          optionsHTML += `</optgroup>`;
-        }
-
-        if (apjsOutrasDel.length > 0) {
-          optionsHTML += `<optgroup label="--- DEMAIS APJs DO SISTEMA ---">`;
-          apjsOutrasDel.forEach(apj => {
-            const isFerias = checkFeriasConflict(apj.id, lacuna.data, lacuna.data);
-            const isEscalado = appState.escalas.some(e => e.data === lacuna.data && e.periodo === lacuna.periodo && e.servidorId === apj.id);
-            const warnText = isFerias ? ' ⚠️ [FÉRIAS]' : isEscalado ? ' ⚠️ [JÁ ESCALADO]' : '';
-            optionsHTML += `<option value="${apj.id}">${getServidorDisplayName(apj)}${warnText}</option>`;
-          });
-          optionsHTML += `</optgroup>`;
-        }
-
-        return `
-          <td class="py-2.5 px-3 font-bold text-slate-800">${d}/${m}/${y}</td>
-          <td class="py-2.5 px-3 font-bold ${lacuna.periodo === 'DIURNO' ? 'text-amber-800' : 'text-indigo-800'}">${lacuna.periodo}</td>
-          <td class="py-2.5 px-3 font-bold text-indigo-950">${getServidorDisplayName(del)}</td>
-          <td class="py-2.5 px-3 text-slate-600">${delUnit ? delUnit.nome.toUpperCase() : '-'}</td>
-          <td class="py-2.5 px-3">
-            <div class="space-y-1">
-              <input type="text" onkeyup="filterSelectOptions('filter_${rowId}', 'select_${rowId}')" id="filter_${rowId}" placeholder="Filtrar APJ..." class="w-full text-xs border border-slate-300 rounded px-2 py-0.5 bg-white">
-              <select id="select_${rowId}" data-date="${lacuna.data}" data-periodo="${lacuna.periodo}" class="vincular-apj-select w-full border border-slate-300 rounded p-1 font-semibold text-slate-800 focus:ring-2 focus:ring-indigo-500">
-                ${optionsHTML}
-              </select>
-            </div>
-          </td>
-          <td class="py-2.5 px-3 text-center">
-            <button onclick="saveSingleVincularApj('select_${rowId}')" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-3 py-1 rounded text-xs shadow-2xs transition">
-              <i class="fa-solid fa-check"></i> Vincular
-            </button>
-          </td>
-        `;
-      }, 'Nenhuma lacuna de APJ encontrada para o período e modalidade selecionados.');
-    }
-
-    function saveSingleVincularApj(selectElementId) {
-      const select = document.getElementById(selectElementId);
-      if (!select || !select.value) {
-        alert('Por favor, selecione um APJ para realizar o vínculo.');
-        return;
-      }
-
-      const dateStr = select.dataset.date;
-      const periodo = select.dataset.periodo;
-      const apjId = select.value;
-      const isExtra = document.getElementById('vincular-extrajornada-select')?.value === 'true';
-
-      const feriasConflict = checkFeriasConflict(apjId, dateStr, dateStr);
-      if (feriasConflict) {
-        const srv = appState.servidores.find(s => s.id === apjId);
-        if (!confirm(`ATENÇÃO: O APJ ${srv ? srv.nome : ''} está em FÉRIAS na data ${dateStr}.\n\nDeseja confirmar a vinculação mesmo assim?`)) return;
-      }
-
-      appState.escalas.push({
-        id: 'e_vinc_' + Date.now(),
-        data: dateStr,
-        periodo,
-        servidorId: apjId,
-        extrajornada: isExtra
-      });
-
-      saveState();
-      renderCalendar();
-      renderCentralVigentesTable();
-      renderVincularApjTable();
-      addAuditLog('Vínculo APJ/Delegado', `Vinculado APJ para ${dateStr} (${periodo})`);
-      alert('APJ vinculado com sucesso!');
-    }
-
-    function saveAllVincularApj() {
-      const selects = document.querySelectorAll('.vincular-apj-select');
-      const isExtra = document.getElementById('vincular-extrajornada-select')?.value === 'true';
-      let count = 0;
-
-      selects.forEach(select => {
-        const apjId = select.value;
-        if (apjId) {
-          const dateStr = select.dataset.date;
-          const periodo = select.dataset.periodo;
-
-          appState.escalas.push({
-            id: 'e_vinc_all_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
-            data: dateStr,
-            periodo,
-            servidorId: apjId,
-            extrajornada: isExtra
-          });
-          count++;
-        }
-      });
-
-      if (count === 0) {
-        alert('Nenhum APJ foi selecionado para vinculação nas linhas exibidas.');
-        return;
-      }
-
-      saveState();
-      renderCalendar();
-      renderCentralVigentesTable();
-      renderVincularApjTable();
-      addAuditLog('Vínculo em Massa APJ/Delegado', `Vinculados ${count} APJs para lacunas pendentes`);
-      alert(`${count} vínculos de APJ confirmados com sucesso!`);
-    }
-
-    function deleteCentralPlantao(id) {
-      if (!hasPermission('gestaoCRF')) {
-        alert('Você não tem permissão para excluir lançamentos da Central de Flagrantes.');
-        return;
-      }
-      if (confirm('Deseja excluir este plantão da Central de Flagrantes?')) {
-        appState.escalas = appState.escalas.filter(e => e.id !== id);
-        saveState();
-        renderCentralVigentesTable();
-        renderCalendar();
-        suggestNextCentralShift();
-        populateSobreavisoDelegaciaDropdowns();
-      }
-    }
-
-    function expandVigentesModal(mode) {
-      currentModalExpandMode = mode;
-      const title = document.getElementById('modal-expand-title');
-      const searchInput = document.getElementById('modal-expand-search');
-
-      if (searchInput) searchInput.value = '';
-
-      if (mode === 'DELEGACIA') {
-        const delSelect = document.getElementById('gestao-sobreaviso-delegacia');
-        const delObj = appState.delegacias.find(d => d.id === delSelect.value);
-        title.innerHTML = `<i class="fa-solid fa-building-user text-emerald-400"></i> Lançamentos da Delegacia: ${delObj ? delObj.nome.toUpperCase() : ''}`;
-      } else {
-        title.innerHTML = `<i class="fa-solid fa-shield-halved text-indigo-400"></i> Lançamentos Vigentes na Central de Flagrantes`;
-      }
-
-      renderModalExpandTable();
-      ModalManager.open('modal-expand-vigentes');
-    }
-
-    function sortModalExpandTable(field) {
-      if (modalExpandSortState.field === field) {
-        modalExpandSortState.direction = modalExpandSortState.direction === 'asc' ? 'desc' : 'asc';
-      } else {
-        modalExpandSortState.field = field;
-        modalExpandSortState.direction = 'asc';
-      }
-      renderModalExpandTable();
-    }
-
-    function renderModalExpandTable() {
-      const thead = document.getElementById('modal-expand-thead');
-      const countLabel = document.getElementById('modal-expand-count');
-      const filterText = normalizeText(document.getElementById('modal-expand-search')?.value || '');
-
-      if (currentModalExpandMode === 'FERIAS') {
-        thead.innerHTML = `<tr>
-          <th class="py-3 px-4 cursor-pointer hover:bg-slate-700 select-none" onclick="sortModalExpandTable('servidor')">Servidor <i class="fa-solid fa-sort text-[10px]"></i></th>
-          <th class="py-3 px-4 cursor-pointer hover:bg-slate-700 select-none" onclick="sortModalExpandTable('inicio')">Data Inicial <i class="fa-solid fa-sort text-[10px]"></i></th>
-          <th class="py-3 px-4 cursor-pointer hover:bg-slate-700 select-none" onclick="sortModalExpandTable('fim')">Data Final <i class="fa-solid fa-sort text-[10px]"></i></th>
-          <th class="py-3 px-4 cursor-pointer hover:bg-slate-700 select-none" onclick="sortModalExpandTable('obs')">Observações <i class="fa-solid fa-sort text-[10px]"></i></th>
-          <th class="py-3 px-4 text-center">Ações</th>
-        </tr>`;
-
-        let list = appState.ferias.filter(f => {
-          if (!filterText) return true;
-          const srv = appState.servidores.find(s => s.id === f.servidorId);
-          const fullText = normalizeText(`${srv ? srv.nome : ''} ${srv ? srv.cargo : ''} ${srv ? srv.login : ''} ${f.inicio} ${f.fim} ${f.obs}`);
-          return fullText.includes(filterText);
-        });
-
-        if (modalExpandSortState.field) {
-          const field = modalExpandSortState.field;
-          const dir = modalExpandSortState.direction === 'asc' ? 1 : -1;
-          list.sort((a, b) => {
-            let valA = a[field] || '';
-            let valB = b[field] || '';
-            if (field === 'servidor') {
-              const sA = appState.servidores.find(s => s.id === a.servidorId);
-              const sB = appState.servidores.find(s => s.id === b.servidorId);
-              valA = sA ? sA.nome : '';
-              valB = sB ? sB.nome : '';
-            }
-            return String(valA).localeCompare(String(valB)) * dir;
-          });
-        }
-
-        countLabel.textContent = `${list.length} registros exibidos`;
-
-        renderTableGeneric('modal-expand-tbody', list, (f) => {
-          const srv = appState.servidores.find(s => s.id === f.servidorId);
-          const [yI, mI, dI] = f.inicio.split('-');
-          const [yF, mF, dF] = f.fim.split('-');
-
-          return `
-            <td class="py-3 px-4 font-bold text-slate-800">${srv ? getServidorDisplayName(srv) : '-'}</td>
-            <td class="py-3 px-4 font-semibold text-indigo-700">${dI}/${mI}/${yI}</td>
-            <td class="py-3 px-4 font-semibold text-indigo-700">${dF}/${mF}/${yF}</td>
-            <td class="py-3 px-4 text-slate-600">${f.obs || '-'}</td>
-            <td class="py-3 px-4 text-center">
-              <button onclick="deleteFerias('${f.id}'); renderModalExpandTable();" class="text-red-600 hover:text-red-800 font-bold"><i class="fa-solid fa-trash"></i></button>
-            </td>
-          `;
-        }, 'Nenhum registro de férias encontrado.');
-      } else if (currentModalExpandMode === 'DELEGACIA') {
-        thead.innerHTML = `<tr>
-          <th class="py-3 px-4 cursor-pointer hover:bg-slate-700 select-none" onclick="sortModalExpandTable('modalidade')">Modalidade <i class="fa-solid fa-sort text-[10px]"></i></th>
-          <th class="py-3 px-4 cursor-pointer hover:bg-slate-700 select-none" onclick="sortModalExpandTable('inicio')">Início <i class="fa-solid fa-sort text-[10px]"></i></th>
-          <th class="py-3 px-4 cursor-pointer hover:bg-slate-700 select-none" onclick="sortModalExpandTable('fim')">Fim <i class="fa-solid fa-sort text-[10px]"></i></th>
-          <th class="py-3 px-4 cursor-pointer hover:bg-slate-700 select-none" onclick="sortModalExpandTable('servidores')">Servidores Vinculados <i class="fa-solid fa-sort text-[10px]"></i></th>
-          <th class="py-3 px-4 cursor-pointer hover:bg-slate-700 select-none" onclick="sortModalExpandTable('viatura')">Viatura <i class="fa-solid fa-sort text-[10px]"></i></th>
-          <th class="py-3 px-4 text-center">Ações</th>
-        </tr>`;
-
-        const delSelect = document.getElementById('gestao-sobreaviso-delegacia');
-        let list = appState.sobreavisos.filter(sb => sb.delegaciaId === delSelect.value);
-        if (filterText) {
-          list = list.filter(sb => {
-            const srvNames = sb.servidoresIds.map(id => {
-              const s = appState.servidores.find(srv => srv.id === id);
-              return s ? `${s.cargo} ${s.nome} ${s.login}` : '';
-            }).join(' ');
-            const fullText = normalizeText(`${sb.modalidade} ${sb.inicio} ${sb.fim} ${sb.viatura} ${srvNames}`);
-            return fullText.includes(filterText);
-          });
-        }
-
-        if (modalExpandSortState.field) {
-          const field = modalExpandSortState.field;
-          const dir = modalExpandSortState.direction === 'asc' ? 1 : -1;
-          list.sort((a, b) => {
-            if (field === 'servidores') {
-              const namesA = a.servidoresIds.map(id => appState.servidores.find(s => s.id === id)?.nome || '').join(' ');
-              const namesB = b.servidoresIds.map(id => appState.servidores.find(s => s.id === id)?.nome || '').join(' ');
-              return namesA.localeCompare(namesB) * dir;
-            }
-            return String(a[field] || '').localeCompare(String(b[field] || '')) * dir;
-          });
-        } else {
-          list.sort((a, b) => {
-            const modA = a.modalidade || 'SOBREAVISO';
-            const modB = b.modalidade || 'SOBREAVISO';
-            if (modA === 'PLANTONISTA' && modB !== 'PLANTONISTA') return -1;
-            if (modA !== 'PLANTONISTA' && modB === 'PLANTONISTA') return 1;
-            return b.inicio.localeCompare(a.inicio);
-          });
-        }
-
-        countLabel.textContent = `${list.length} registros exibidos`;
-
-        renderTableGeneric('modal-expand-tbody', list, (sb) => {
-          const srvNames = sb.servidoresIds.map(id => {
-            const s = appState.servidores.find(srv => srv.id === id);
-            return s ? getServidorDisplayName(s) : id;
-          }).join(', ');
-
-          const formatDT = (dt) => {
-            if (!dt) return '-';
-            const [d, t] = dt.split('T'); const [y, m, day] = d.split('-');
-            return `${day}/${m}/${y} ${t}`;
-          };
-
-          return `
-            <td class="py-3 px-4 font-bold text-slate-800">${sb.modalidade || 'SOBREAVISO'}</td>
-            <td class="py-3 px-4 font-bold text-emerald-800">${formatDT(sb.inicio)}</td>
-            <td class="py-3 px-4 font-bold text-emerald-800">${formatDT(sb.fim)}</td>
-            <td class="py-3 px-4 font-semibold text-slate-800">${srvNames}</td>
-            <td class="py-3 px-4 font-mono text-slate-600">${sb.viatura || '-'}</td>
-            <td class="py-3 px-4 text-center">
-              <button onclick="deleteSobreaviso('${sb.id}'); renderModalExpandTable();" class="text-red-600 hover:text-red-800 font-bold"><i class="fa-solid fa-trash"></i></button>
-            </td>
-          `;
-        }, 'Nenhum registro encontrado.');
-      } else {
-        thead.innerHTML = `<tr>
-          <th class="py-3 px-4 cursor-pointer hover:bg-slate-700 select-none" onclick="sortModalExpandTable('data')">Data <i class="fa-solid fa-sort text-[10px]"></i></th>
-          <th class="py-3 px-4 cursor-pointer hover:bg-slate-700 select-none" onclick="sortModalExpandTable('periodo')">Turno <i class="fa-solid fa-sort text-[10px]"></i></th>
-          <th class="py-3 px-4 cursor-pointer hover:bg-slate-700 select-none" onclick="sortModalExpandTable('extrajornada')">Tipo <i class="fa-solid fa-sort text-[10px]"></i></th>
-          <th class="py-3 px-4 cursor-pointer hover:bg-slate-700 select-none" onclick="sortModalExpandTable('servidor')">Servidor Escalado <i class="fa-solid fa-sort text-[10px]"></i></th>
-          <th class="py-3 px-4 cursor-pointer hover:bg-slate-700 select-none" onclick="sortModalExpandTable('unidade')">Unidade / Lotação <i class="fa-solid fa-sort text-[10px]"></i></th>
-          <th class="py-3 px-4 text-center">Ações</th>
-        </tr>`;
-
-        let list = appState.escalas.filter(e => {
-          if (!filterText) return true;
-          const srv = appState.servidores.find(s => s.id === e.servidorId);
-          const del = srv ? appState.delegacias.find(d => d.id === srv.delegaciaId) : null;
-          const sdp = srv ? appState.sdps.find(s => s.id === srv.sdpId) : null;
-          const [y, m, d] = e.data.split('-');
-          const dataBr = `${d}/${m}/${y}`;
-          const fullText = normalizeText(`${dataBr} ${e.data} ${e.periodo} ${e.extrajornada ? 'extra extrajornada' : 'regular ordinario'} ${srv ? srv.nome : ''} ${srv ? srv.cargo : ''} ${srv ? srv.login : ''} ${del ? del.nome : ''} ${sdp ? sdp.nome : ''}`);
-          return fullText.includes(filterText);
-        });
-
-        if (modalExpandSortState.field) {
-          const field = modalExpandSortState.field;
-          const dir = modalExpandSortState.direction === 'asc' ? 1 : -1;
-          list.sort((a, b) => {
-            let valA = a[field] || '';
-            let valB = b[field] || '';
-            if (field === 'servidor') {
-              const sA = appState.servidores.find(s => s.id === a.servidorId);
-              const sB = appState.servidores.find(s => s.id === b.servidorId);
-              valA = sA ? sA.nome : '';
-              valB = sB ? sB.nome : '';
-            } else if (field === 'unidade') {
-              const sA = appState.servidores.find(s => s.id === a.servidorId);
-              const sB = appState.servidores.find(s => s.id === b.servidorId);
-              const delA = sA ? appState.delegacias.find(d => d.id === sA.delegaciaId) : null;
-              const delB = sB ? appState.delegacias.find(d => d.id === sB.delegaciaId) : null;
-              valA = delA ? delA.nome : '';
-              valB = delB ? delB.nome : '';
-            }
-            return String(valA).localeCompare(String(valB)) * dir;
-          });
-        } else {
-          list.sort((a, b) => b.data.localeCompare(a.data));
-        }
-
-        countLabel.textContent = `${list.length} registros exibidos`;
-
-        renderTableGeneric('modal-expand-tbody', list, (e) => {
-          const srv = appState.servidores.find(s => s.id === e.servidorId);
-          const del = srv ? appState.delegacias.find(d => d.id === srv.delegaciaId) : null;
-          const [y, m, d] = e.data.split('-');
-
-          return `
-            <td class="py-3 px-4 font-bold text-slate-800">${d}/${m}/${y}</td>
-            <td class="py-3 px-4 font-bold ${e.periodo === 'DIURNO' ? 'text-amber-800' : 'text-indigo-800'}">${e.periodo}</td>
-            <td class="py-3 px-4"><span class="px-2 py-0.5 rounded text-[9px] font-bold ${e.extrajornada ? 'bg-purple-100 text-purple-800' : 'bg-slate-200 text-slate-700'}">${e.extrajornada ? 'EXTRA' : 'REGULAR'}</span></td>
-            <td class="py-3 px-4 font-bold text-slate-800">${srv ? getServidorDisplayName(srv) : '-'}</td>
-            <td class="py-3 px-4 text-slate-600">${del ? del.nome.toUpperCase() : '-'}</td>
-            <td class="py-3 px-4 text-center">
-              <button onclick="deleteCentralPlantao('${e.id}'); renderModalExpandTable();" class="text-red-600 hover:text-red-800 font-bold"><i class="fa-solid fa-trash"></i></button>
-            </td>
-          `;
-        }, 'Nenhum lançamento encontrado na Central.');
-      }
-    }
-
-    function handleAssignShiftModal(e) {
-      e.preventDefault();
-      if (!hasPermission('gestaoCRF')) {
-        alert('Você não tem permissão para realizar lançamentos na Central de Flagrantes.');
-        return;
-      }
-      const shiftId = document.getElementById('assign-shift-id-m')?.value;
-      const data = document.getElementById('assign-date-m').value;
-      const periodo = document.getElementById('assign-period-m').value;
-      const servidorId = document.getElementById('assign-servidor-m').value;
-      const extrajornada = document.getElementById('assign-extrajornada-m').value === 'true';
-
-      if (!data || !servidorId) {
-        alert('Por favor, selecione uma data e um servidor.');
-        return;
-      }
-
-      const feriasConflict = checkFeriasConflict(servidorId, data, data);
-      if (feriasConflict) {
-        const srv = appState.servidores.find(s => s.id === servidorId);
-        const srvName = srv ? srv.nome : 'Selecionado';
-        const [yI, mI, dI] = feriasConflict.inicio.split('-');
-        const [yF, mF, dF] = feriasConflict.fim.split('-');
-        if (!confirm(`ATENÇÃO: O servidor ${srvName} está cadastrado em FÉRIAS (${dI}/${mI}/${yI} a ${dF}/${mF}/${yF}).
-
-Deseja confirmar o lançamento mesmo assim?`)) {
-          return;
-        }
-      }
-
-      const isDuplicateCentral = appState.escalas.some(e => e.id !== shiftId && e.data === data && e.periodo === periodo && e.servidorId === servidorId);
-      if (isDuplicateCentral) {
-        alert('Este servidor já está escalado para este mesmo turno e data na Central de Flagrantes.');
-        return;
-      }
-
-      if (shiftId) {
-        const idx = appState.escalas.findIndex(item => item.id === shiftId);
-        if (idx !== -1) {
-          appState.escalas[idx] = { ...appState.escalas[idx], data, periodo, servidorId, extrajornada };
-          addAuditLog('Edição Central', `Atualizado plantão (${shiftId}) para ${data} (${periodo})`);
-        }
-        document.getElementById('assign-shift-id-m').value = '';
-        const btnSubmit = document.querySelector('#form-assign-shift-central button[type="submit"]');
-        if (btnSubmit) btnSubmit.textContent = 'Salvar Plantão na Central';
-      } else {
-        appState.escalas.push({ id: 'e_' + Date.now(), data, periodo, servidorId, extrajornada });
-        addAuditLog('Inclusão Central', `Adicionado plantão para ${data} (${periodo})`);
-      }
-
-      saveState();
-      renderCalendar();
-      renderCentralVigentesTable();
-      renderFeriasTable();
-      suggestNextCentralShift();
-        populateSobreavisoDelegaciaDropdowns();
-
-      const selectServidor = document.getElementById('assign-servidor-m');
-      if (selectServidor) selectServidor.selectedIndex = -1;
-      
-      const inputFilter = document.getElementById('assign-servidor-filter-m');
-      if (inputFilter) {
-        inputFilter.value = '';
-        filterSelectOptions('assign-servidor-filter-m', 'assign-servidor-m');
-      }
-
-      alert(shiftId ? 'Plantão atualizado com sucesso!' : 'Plantão incluído na Escala da Central de Flagrantes!');
-    }
-
-    function editCentralPlantao(id) {
-      const e = appState.escalas.find(item => item.id === id);
-      if (!e) return;
-
-      document.getElementById('assign-shift-id-m').value = e.id;
-      document.getElementById('assign-date-m').value = e.data;
-      document.getElementById('assign-period-m').value = e.periodo;
-      document.getElementById('assign-servidor-m').value = e.servidorId;
-      document.getElementById('assign-extrajornada-m').value = e.extrajornada ? 'true' : 'false';
-
-      const btnSubmit = document.querySelector('#form-assign-shift-central button[type="submit"]');
-      if (btnSubmit) btnSubmit.textContent = 'Atualizar Plantão na Central';
-
-      document.getElementById('form-assign-shift-central')?.scrollIntoView({ behavior: 'smooth' });
-    }
-
-    function purgeEscalaFromDateModal() {
-      const dateStr = document.getElementById('purge-from-date-m').value;
-      if (!dateStr) {
-        alert('Selecione uma data para realizar a exclusão.');
-        return;
-      }
-
-      if (confirm(`Confirma a exclusão de TODOS os plantões da Central a partir de ${dateStr}?`)) {
-        const initialCount = appState.escalas.length;
-        appState.escalas = appState.escalas.filter(e => e.data < dateStr);
-        const removedCount = initialCount - appState.escalas.length;
-
-        saveState();
-        renderCalendar();
-        renderCentralVigentesTable();
-        suggestNextCentralShift();
-        populateSobreavisoDelegaciaDropdowns();
-        addAuditLog('Exclusão Parcial Central', `Removidos ${removedCount} plantões a partir de ${dateStr}`);
-        alert(`Sucesso! ${removedCount} plantões foram removidos.`);
-      }
-    }
-
-    function openAuditLogModal() {
-      renderAuditLogsTable();
-      ModalManager.open('modal-audit-log');
-    }
-
-    function renderAuditLogsTable() {
-      const start = document.getElementById('audit-filter-start').value;
-      const end = document.getElementById('audit-filter-end').value;
-
-      let filtered = appState.auditLogs;
-      if (start) filtered = filtered.filter(l => l.rawDate && l.rawDate.substring(0, 10) >= start);
-      if (end) filtered = filtered.filter(l => l.rawDate && l.rawDate.substring(0, 10) <= end);
-
-      renderTableGeneric('audit-log-tbody', filtered, (log) => `
-        <td class="py-2 px-3 text-slate-500 whitespace-nowrap">${log.timestamp}</td>
-        <td class="py-2 px-3 font-bold text-indigo-700">${log.perfil}</td>
-        <td class="py-2 px-3 font-semibold text-slate-800">${log.acao}</td>
-        <td class="py-2 px-3 text-slate-600">${log.detalhes}</td>
-      `, 'Nenhum registro de modificação encontrado.');
-    }
-
-    function printAuditLogs() {
-      const start = document.getElementById('audit-filter-start').value;
-      const end = document.getElementById('audit-filter-end').value;
-
-      let filtered = appState.auditLogs;
-      if (start) filtered = filtered.filter(l => l.rawDate && l.rawDate.substring(0, 10) >= start);
-      if (end) filtered = filtered.filter(l => l.rawDate && l.rawDate.substring(0, 10) <= end);
-
-      const win = window.open('', '_blank');
-      win.document.write(`
-        <html>
-          <head>
-            <title>Histórico de Modificações - Impressão</title>
-            <style>
-              body { font-family: sans-serif; font-size: 10pt; padding: 20px; }
-              table { width: 100%; border-collapse: collapse; margin-top: 15px; }
-              th, td { border: 1px solid #ccc; padding: 6px; text-align: left; }
-              th { background: #f1f5f9; }
-                .bg-excecao-laranja {
-      background-color: #ffedd5 !important;
-      border-color: #f97316 !important;
-      color: #9a3412 !important;
-    }
-  </style>
-          </head>
-          <body>
-            <h2>8ª CENTRAL REGIONAL DE FLAGRANTES - LOG DE MODIFICAÇÕES</h2>
-            <p>Emissão: ${new Date().toLocaleString('pt-BR')}</p>
-            <table>
-              <thead><tr><th>Data/Hora</th><th>Perfil Responsável</th><th>Ação</th><th>Detalhes</th></tr></thead>
-              <tbody>${filtered.map(l => `<tr><td>${l.timestamp}</td><td>${l.perfil}</td><td>${l.acao}</td><td>${l.detalhes}</td></tr>`).join('')}</tbody>
-            </table>
-          </body>
-        </html>
-      `);
-      win.document.close();
-      win.print();
-    }
-
-    function updateServidorFuncaoCRF(servidorId, novaFuncao) {
-      if (!canUserModifyServidor(servidorId)) {
-        alert('Você não tem permissão para alterar servidores fora da sua Delegacia.');
-        renderServidoresTable();
-        return;
-      }
-
-      const srv = appState.servidores.find(s => s.id === servidorId);
-      if (srv) {
-        srv.funcaoCRF = novaFuncao;
-        saveState();
-        addAuditLog('Alteração Função CRF', `Função CRF do servidor ${srv.nome} alterada para ${novaFuncao}`);
-      }
-    }
-
-    function updateServidorFuncaoDP(servidorId, novaFuncao) {
-      if (!canUserModifyServidor(servidorId)) {
-        alert('Você não tem permissão para alterar servidores fora da sua Delegacia.');
-        renderServidoresTable();
-        return;
-      }
-
-      const srv = appState.servidores.find(s => s.id === servidorId);
-      if (srv) {
-        srv.funcaoDP = novaFuncao;
-
-        // Se a Função DP for SUPERINTENDENTE, eleva o perfil (exceto para Administradores)
-        if (srv.nivelAcesso !== 'ADMINISTRADOR' && srv.login !== 'admin') {
-          if (novaFuncao === 'SUPERINTENDENTE') {
-            srv.nivelAcesso = 'SUPERINTENDENTE';
-          } else if (srv.cargo === 'APJ' && srv.nivelAcesso === 'SUPERINTENDENTE') {
-            srv.nivelAcesso = 'APJ';
-          }
-        }
-
-        saveState();
-        renderServidoresTable();
-        renderSobreavisoTable();
-        addAuditLog('Alteração Função DP', `Função DP de ${srv.nome} alterada para ${novaFuncao} (Acesso: ${srv.nivelAcesso})`);
+    } alterada para ${novaFuncao} (Acesso: ${srv.nivelAcesso})`);
         if (appState.currentUserServidorId === srv.id) { appState.profile = srv.nivelAcesso; renderCurrentProfile(); }
       }
     }
@@ -4920,17 +4021,31 @@ Deseja confirmar o lançamento mesmo assim?`)) {
     }
 
 function openServidorModal(servidorId = null) {
+      const activeUser = getActiveUserServidor();
+      const scope = getScopePermission('escopoServidores');
+
+      if (appState.profile !== 'ADMINISTRADOR' && appState.profile !== 'COORDENADOR' && scope === 'NENHUM') {
+        alert('Seu perfil não possui permissão para gerenciar servidores.');
+        return;
+      }
+
+      if (servidorId && !canUserModifyServidor(servidorId)) {
+        alert('Você não tem permissão para editar este servidor.');
+        return;
+      }
+
       const selectAcesso = document.getElementById('servidor-nivel-acesso');
       if (selectAcesso) {
         Array.from(selectAcesso.options).forEach(opt => {
-          if (opt.value === 'ADMINISTRADOR' || opt.value === 'COORDENADOR') {
-            opt.disabled = (appState.profile !== 'ADMINISTRADOR');
+          if (appState.profile === 'ADMINISTRADOR') {
+            opt.disabled = false;
+          } else if (appState.profile === 'COORDENADOR') {
+            opt.disabled = (opt.value === 'ADMINISTRADOR');
+          } else {
+            // Delegados/Superintendentes/APJs NÃO podem conceder DELEGADO, COORDENADOR ou ADMINISTRADOR
+            opt.disabled = ['DELEGADO', 'COORDENADOR', 'ADMINISTRADOR'].includes(opt.value);
           }
         });
-      }
-      if (appState.profile !== 'ADMINISTRADOR' && appState.profile !== 'COORDENADOR') {
-        alert('Apenas ADMINISTRADOR e COORDENADOR podem gerenciar servidores.');
-        return;
       }
 
       document.getElementById('servidor-id').value = '';
@@ -5051,23 +4166,47 @@ function updateDelegaciaDropdowns() {
     function handleSaveServidor(e) {
       e.preventDefault();
       const id = document.getElementById('servidor-id').value;
+      const activeUser = getActiveUserServidor();
+
+      if (id && !canUserModifyServidor(id)) {
+        alert('Você não tem permissão para editar este servidor.');
+        return;
+      }
+
       const cargo = document.getElementById('servidor-cargo').value.toUpperCase();
       const nome = document.getElementById('servidor-nome').value.trim().toUpperCase();
-      
       let nivelAcesso = document.getElementById('servidor-nivel-acesso').value;
+
+      // TRAVA DE SEGURANÇA: Impede que Delegados concedam acesso DELEGADO, COORDENADOR ou ADMINISTRADOR
+      if (appState.profile !== 'ADMINISTRADOR' && appState.profile !== 'COORDENADOR') {
+        if (['DELEGADO', 'COORDENADOR', 'ADMINISTRADOR'].includes(nivelAcesso)) {
+          alert('Permissão negada: Você não possui autorização para conceder o perfil de Delegado, Coordenador ou Administrador.');
+          return;
+        }
+      }
+
+      // TRAVA DE IMPEDIMENTO DE AUTO-DESPROMOÇÃO DO DELEGADO
+      if (id && activeUser && id === activeUser.id && activeUser.cargo === 'DELEGADO') {
+        if (nivelAcesso !== 'DELEGADO' && appState.profile !== 'ADMINISTRADOR') {
+          alert('Ação bloqueada: Você não pode remover ou alterar o seu próprio perfil de Delegado.');
+          return;
+        }
+      }
+
       const sdpId = document.getElementById('servidor-subdivisao').value;
       const delegaciaId = document.getElementById('servidor-delegacia').value;
+
+      // Restringe a lotação à própria delegacia do Delegado se o escopo for DELEGACIA
+      if (getScopePermission('escopoServidores') === 'DELEGACIA' && activeUser) {
+        if (delegaciaId !== activeUser.delegaciaId) {
+          alert('Você só pode cadastrar/editar servidores na sua própria Delegacia de lotação.');
+          return;
+        }
+      }
+
       const telefone = formatPhoneNumber(document.getElementById('servidor-telefone').value.trim());
       const funcaoCRF = document.getElementById('servidor-funcao-crf').value || 'ROTATIVO';
       const funcaoDP = document.getElementById('servidor-funcao-dp').value || 'PLANTONISTA';
-
-      if (id === DEFAULT_DEV_ADMIN_ID || (id && appState.servidores.find(s => s.id === id && s.login === 'admin'))) {
-        nivelAcesso = 'ADMINISTRADOR'; // Impede auto-limitação ou rebaixamento do Admin
-      } else if (funcaoDP === 'SUPERINTENDENTE') {
-        nivelAcesso = 'SUPERINTENDENTE';
-      } else if ((nivelAcesso === 'ADMINISTRADOR' || nivelAcesso === 'COORDENADOR') && appState.profile !== 'ADMINISTRADOR') {
-        nivelAcesso = (cargo === 'DELEGADO') ? 'DELEGADO' : 'APJ';
-      }
 
       const generatedLogin = generateServidorLogin(nome, cargo, id);
 
