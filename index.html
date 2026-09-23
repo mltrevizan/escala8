@@ -2374,11 +2374,15 @@
         appState.profile = srv.nivelAcesso || (srv.cargo === 'DELEGADO' ? 'DELEGADO' : 'APJ');
 
         if (srv.delegaciaId) {
-          const targetId = getConsorcioIdForDelegacia(srv.delegaciaId) || srv.delegaciaId;
+          const consorcioId = getConsorcioIdForDelegacia(srv.delegaciaId) || srv.delegaciaId;
           const selectGestaoDel = document.getElementById('gestao-sobreaviso-delegacia');
           const selectFilterDel = document.getElementById('filter-delegacia-mode');
-          if (selectGestaoDel) selectGestaoDel.value = targetId;
-          if (selectFilterDel && appState.calendarMode === 'DELEGACIA') selectFilterDel.value = targetId;
+          
+          // Na Gestão, pré-seleciona o Consórcio se existir
+          if (selectGestaoDel) selectGestaoDel.value = consorcioId;
+          
+          // No Filtro do Calendário (Botão Delegacia), seleciona a Delegacia Individual do Servidor
+          if (selectFilterDel) selectFilterDel.value = srv.delegaciaId;
         }
 
         if (srv.sdpId) {
@@ -3802,6 +3806,10 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
         body.innerHTML = html;
       }
 
+      const btnTrocaModal = document.getElementById('btn-troca-plantao-modal');
+      if (btnTrocaModal) {
+        btnTrocaModal.classList.toggle('hidden', !hasPermission('fazerTrocaPlantao'));
+      }
       ModalManager.open('modal-shift-details');
     }
 
@@ -4034,8 +4042,12 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
     }
 
     function openManageLoginModal(servidorId) {
-      if (!canUserModifyServidor(servidorId)) {
-        alert('Você não tem permissão para gerenciar servidores fora da sua Delegacia.');
+      const activeUser = getActiveUserServidor();
+      const isSelf = activeUser && activeUser.id === servidorId;
+      
+      // Permite que o próprio servidor altere sua senha no Primeiro Acesso ou nas suas configurações
+      if (!isSelf && !canUserModifyServidor(servidorId)) {
+        alert('Você não tem permissão para gerenciar credenciais de outros servidores.');
         return;
       }
 
