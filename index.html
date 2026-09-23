@@ -2109,10 +2109,13 @@
 
       setupTooltipEvents();
 
-      // Renderização síncrona e imediata para garantir que o calendário carrega sempre
+      // Garante o modo inicial correto para a Central de Flagrantes (CRF)
+      appState.calendarMode = 'PLANTONISTA';
+
+      // Renderização local imediata
       renderAllViews();
 
-      // Sincronização remota via Firestore em segundo plano
+      // Carregamento do Firestore sincronizando e redesenhando o calendário
       loadStateFromFirestore(() => {
         renderAllViews();
       });
@@ -2120,7 +2123,7 @@
 
     function renderAllViews() {
       renderCurrentProfile();
-      renderCalendar();
+      toggleCalendarMode(appState.calendarMode || 'PLANTONISTA');
       renderServidoresTable();
       renderSubdivisoesCards();
       renderFeriadosTable();
@@ -2207,7 +2210,7 @@
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
       } catch (e) {
-        console.warn('Aviso: localStorage bloqueado (Janela Anónima). Estado mantido em memória.');
+        console.warn('Aviso: localStorage indisponível ou limite excedido. Estado mantido temporariamente em memória.');
       }
       syncStateToFirestore();
     }
@@ -3338,6 +3341,161 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       }
     }
 
+    
+    function openVincularApjModal() {
+      const startDateInput = document.getElementById('vincular-start-date');
+      if (startDateInput && !startDateInput.value) {
+        const now = new Date();
+        startDateInput.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      }
+      renderVincularApjTable();
+      ModalManager.open('modal-vincular-apj');
+    }
+
+    function renderVincularApjTable() {
+      const tbody = document.getElementById('vincular-apj-tbody');
+      const badge = document.getElementById('vincular-count-badge');
+      const startDateStr = document.getElementById('vincular-start-date')?.value;
+      const isExtra = document.getElementById('vincular-extrajornada-select')?.value === 'true';
+
+      if (!tbody || !startDateStr) return;
+
+      tbody.innerHTML = '';
+
+      // Filtra plantões da Central a partir da data informada
+      const plantoesPeriodo = appState.escalas.filter(e => e.data >= startDateStr && e.extrajornada === isExtra);
+
+      // Agrupa por data e turno
+      const grouped = {};
+      plantoesPeriodo.forEach(e => {
+        const key = `${e.data}_${e.periodo}`;
+        if (!grouped[key]) grouped[key] = { data: e.data, periodo: e.periodo, delegados: [], apjs: [] };
+        
+        const srv = appState.servidores.find(s => s.id === e.servidorId);
+        if (srv) {
+          if (srv.cargo === 'DELEGADO') grouped[key].delegados.push(srv);
+          else if (srv.cargo === 'APJ') grouped[key].apjs.push(srv);
+        }
+      });
+
+      // Identifica turnos que possuem Delegado mas não possuem APJ escalado
+      const lacunas = [];
+      Object.keys(grouped).forEach(k => {
+        const item = grouped[k];
+        if (item.delegados.length > 0 && item.apjs.length === 0) {
+          lacunas.push(item);
+        }
+      });
+
+      if (badge) badge.textContent = `${lacunas.length} lacunas pendentes`;
+
+      if (lacunas.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="100%" class="py-6 text-center text-slate-400 italic font-medium">Nenhuma lacuna pendente encontrada para o período selecionado!</td></tr>';
+        return;
+      }
+
+      // Lista de APJs disponíveis para o dropdown
+      const apjsDisponiveis = appState.servidores.filter(s => s.cargo === 'APJ');
+
+      lacunas.sort((a, b) => a.data.localeCompare(b.data));
+
+      lacunas.forEach(item => {
+        const [y, m, d] = item.data.split('-');
+        const delObj = item.delegados[0];
+        const delUnidadeObj = delObj ? appState.delegacias.find(d => d.id === delObj.delegaciaId) : null;
+
+        const tr = document.createElement('tr');
+        tr.className = 'hover:bg-slate-50 transition border-b border-slate-200';
+
+        let apjOptions = '<option value="">-- Selecione o APJ --</option>';
+        apjsDisponiveis.forEach(apj => {
+          apjOptions += `<option value="${apj.id}">${getServidorDisplayName(apj)}</option>`;
+        });
+
+        tr.innerHTML = `
+          <td class="py-2.5 px-3 font-semibold text-slate-800">${d}/${m}/${y}</td>
+          <td class="py-2.5 px-3 font-bold ${item.periodo === 'DIURNO' ? 'text-amber-800' : 'text-indigo-800'}">${item.periodo}</td>
+          <td class="py-2.5 px-3 font-bold text-slate-800">${delObj ? getServidorDisplayName(delObj) : '-'}</td>
+          <td class="py-2.5 px-3 text-slate-600">${delUnidadeObj ? delUnidadeObj.nome.toUpperCase() : '-'}</td>
+          <td class="py-2.5 px-3">
+            <select class="vincular-single-apj-select w-full border border-slate-300 rounded-lg p-1.5 bg-white text-xs font-semibold" data-date="${item.data}" data-periodo="${item.periodo}">
+              ${apjOptions}
+            </select>
+          </td>
+          <td class="py-2.5 px-3 text-center">
+            <button type="button" onclick="saveSingleVincularApj('${item.data}', '${item.periodo}', this)" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded font-bold shadow-2xs">
+              Vincular
+            </button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function saveSingleVincularApj(dateStr, periodo, btnElem) {
+      const row = btnElem.closest('tr');
+      const select = row.querySelector('.vincular-single-apj-select');
+      const apjId = select ? select.value : null;
+
+      if (!apjId) {
+        alert('Selecione um APJ para realizar a vinculação.');
+        return;
+      }
+
+      const isExtra = document.getElementById('vincular-extrajornada-select')?.value === 'true';
+      const srv = appState.servidores.find(s => s.id === apjId);
+
+      appState.escalas.push({
+        id: 'e_vinc_' + Date.now(),
+        data: dateStr,
+        periodo: periodo,
+        servidorId: apjId,
+        extrajornada: isExtra
+      });
+
+      saveState();
+      renderCalendar();
+      renderCentralVigentesTable();
+      renderVincularApjTable();
+      addAuditLog('Vínculo de APJ', `Vinculado ${srv ? srv.nome : apjId} para ${dateStr} (${periodo})`);
+      alert('APJ vinculado com sucesso!');
+    }
+
+    function saveAllVincularApj() {
+      const selects = document.querySelectorAll('.vincular-single-apj-select');
+      const isExtra = document.getElementById('vincular-extrajornada-select')?.value === 'true';
+      let count = 0;
+
+      selects.forEach(sel => {
+        const apjId = sel.value;
+        const dateStr = sel.getAttribute('data-date');
+        const periodo = sel.getAttribute('data-periodo');
+
+        if (apjId && dateStr && periodo) {
+          appState.escalas.push({
+            id: 'e_vinc_all_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+            data: dateStr,
+            periodo: periodo,
+            servidorId: apjId,
+            extrajornada: isExtra
+          });
+          count++;
+        }
+      });
+
+      if (count === 0) {
+        alert('Selecione pelo menos um APJ nas linhas da tabela para confirmar os vínculos.');
+        return;
+      }
+
+      saveState();
+      renderCalendar();
+      renderCentralVigentesTable();
+      renderVincularApjTable();
+      addAuditLog('Vínculo em Lote APJ', `Vinculados ${count} APJs aos plantões da Central`);
+      alert(`${count} vínculos de APJ confirmados e salvos com sucesso!`);
+    }
+  
     function setupTooltipEvents() {
       const tooltip = document.getElementById('global-tooltip');
       document.addEventListener('mousemove', (e) => {
@@ -3447,7 +3605,8 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       </div>`;
 
       html += `<div class="space-y-2">`;
-      const uniqueServidorIds = Array.from(new Set(sobreavisoObj.servidoresIds));
+      const srvIds = sobreavisoObj.servidoresIds || sobreavisoObj.servidores || [];
+      const uniqueServidorIds = Array.from(new Set(srvIds));
       uniqueServidorIds.forEach(id => {
         const srv = appState.servidores.find(s => s.id === id);
         if (srv) {
