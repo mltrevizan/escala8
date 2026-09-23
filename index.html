@@ -1998,8 +1998,10 @@
       loadState();
       ensureAdminUserExists();
 
+      // GARANTIA DE ACESSO PÚBLICO: Qualquer nova sessão inicia como VISUALIZADOR
       appState.currentUserServidorId = null;
       appState.profile = 'VISUALIZADOR';
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
 
       setupTooltipEvents();
 
@@ -2096,7 +2098,13 @@
     function syncStateToFirestore() {
       if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
         const db = firebase.firestore();
-        db.collection('appData').doc('globalState').set(appState)
+        // Clona o estado sem expor o utilizador logado no documento global remoto
+        const cleanStateToSync = {
+          ...appState,
+          currentUserServidorId: null,
+          profile: 'VISUALIZADOR'
+        };
+        db.collection('appData').doc('globalState').set(cleanStateToSync)
           .then(() => console.log('Dados sincronizados com o Cloud Firestore com sucesso!'))
           .catch(err => console.error('Erro ao sincronizar com Firestore:', err));
       }
