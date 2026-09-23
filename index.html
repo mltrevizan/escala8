@@ -2095,8 +2095,8 @@
         populateAssignServidorDropdown();
         populateLoginUserSelect();
         populateServidorFilters();
-        populateSobreavisoDelegaciaDropdowns();
         suggestNextCentralShift();
+        populateSobreavisoDelegaciaDropdowns();
       });
     });
 
@@ -2542,7 +2542,39 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       const selectHeader = document.getElementById('filter-delegacia-mode');
       const selectGestao = document.getElementById('gestao-sobreaviso-delegacia');
 
-      const optionsHTML = appState.delegacias.map(d => `<option value="${d.id}">${d.nome.toUpperCase()}</option>`).join('');
+      // Mapeia todas as delegacias que pertencem a consórcios ativos
+      const delegaciasConsorciadasIds = new Set();
+      if (appState.plantonsUnificados) {
+        appState.plantonsUnificados.forEach(p => {
+          if (p.delegaciasIds) {
+            p.delegaciasIds.forEach(id => delegaciasConsorciadasIds.add(id));
+          }
+        });
+      }
+
+      let optionsHTML = '';
+
+      // 1. Plantões Unificados / Consórcios (Prioridade no topo)
+      if (appState.plantonsUnificados && appState.plantonsUnificados.length > 0) {
+        optionsHTML += '<optgroup label="--- PLANTÕES UNIFICADOS / CONSÓRCIOS ---">';
+        appState.plantonsUnificados.forEach(p => {
+          optionsHTML += `<option value="${p.id}">🤝 ${p.nome.toUpperCase()}</option>`;
+        });
+        optionsHTML += '</optgroup>';
+      }
+
+      // 2. Delegacias Individuais (Oculta aquelas que já estão em um consórcio)
+      if (appState.delegacias && appState.delegacias.length > 0) {
+        const isoladas = appState.delegacias.filter(d => !delegaciasConsorciadasIds.has(d.id));
+        if (isoladas.length > 0) {
+          optionsHTML += '<optgroup label="--- DELEGACIAS INDIVIDUAIS ---">';
+          isoladas.forEach(d => {
+            optionsHTML += `<option value="${d.id}">${d.nome.toUpperCase()}</option>`;
+          });
+          optionsHTML += '</optgroup>';
+        }
+      }
+
       if (selectHeader) selectHeader.innerHTML = optionsHTML;
 
       if (selectGestao) {
@@ -2550,21 +2582,33 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
         const activeUser = getActiveUserServidor();
         const scope = getScopePermission('escopoDP');
 
-        appState.delegacias.forEach(d => {
-          let canAdd = false;
-          // Administrador ou perfis com escopo 'TODOS' enxergam todas as delegacias sem precisar de usuário ativo vinculado
-          if (appState.profile === 'ADMINISTRADOR' || scope === 'TODOS') {
-            canAdd = true;
-          } else if (scope === 'SUBDIVISAO' && activeUser && d.sdpId === activeUser.sdpId) {
-            canAdd = true;
-          } else if (scope === 'DELEGACIA' && activeUser && d.id === activeUser.delegaciaId) {
-            canAdd = true;
-          }
+        let gestaoOptions = '';
 
-          if (canAdd) {
-            selectGestao.innerHTML += `<option value="${d.id}">${d.nome.toUpperCase()}</option>`;
+        if (appState.plantonsUnificados && appState.plantonsUnificados.length > 0) {
+          gestaoOptions += '<optgroup label="--- PLANTÕES UNIFICADOS / CONSÓRCIOS ---">';
+          appState.plantonsUnificados.forEach(p => {
+            gestaoOptions += `<option value="${p.id}">🤝 ${p.nome.toUpperCase()}</option>`;
+          });
+          gestaoOptions += '</optgroup>';
+        }
+
+        if (appState.delegacias && appState.delegacias.length > 0) {
+          const isoladas = appState.delegacias.filter(d => !delegaciasConsorciadasIds.has(d.id));
+          if (isoladas.length > 0) {
+            gestaoOptions += '<optgroup label="--- DELEGACIAS INDIVIDUAIS ---">';
+            isoladas.forEach(d => {
+              let canAdd = false;
+              if (appState.profile === 'ADMINISTRADOR' || scope === 'TODOS') canAdd = true;
+              else if (scope === 'SUBDIVISAO' && activeUser && d.sdpId === activeUser.sdpId) canAdd = true;
+              else if (scope === 'DELEGACIA' && activeUser && d.id === activeUser.delegaciaId) canAdd = true;
+
+              if (canAdd) gestaoOptions += `<option value="${d.id}">${d.nome.toUpperCase()}</option>`;
+            });
+            gestaoOptions += '</optgroup>';
           }
-        });
+        }
+
+        selectGestao.innerHTML = gestaoOptions;
       }
 
       onDelegaciaSelectionChange();
@@ -3513,12 +3557,17 @@ Deseja confirmar o lançamento mesmo assim?`)) {
       const selectedMod = modSelect ? modSelect.value : 'PLANTONISTA';
 
       srvSelect.innerHTML = '';
+
+      // Verifica se é um Plantão Unificado / Consórcio
+      const consorcioObj = appState.plantonsUnificados ? appState.plantonsUnificados.find(p => p.id === selectedDelId) : null;
+      let targetDelIds = consorcioObj ? consorcioObj.delegaciasIds : [selectedDelId];
+
       const servidoresDaDelegacia = appState.servidores.filter(s => 
-        s.delegaciaId === selectedDelId && (s.funcaoDP || 'PLANTONISTA') !== 'NÃO PARTICIPA'
+        targetDelIds.includes(s.delegaciaId) && (s.funcaoDP || 'PLANTONISTA') !== 'NÃO PARTICIPA'
       );
 
       if (servidoresDaDelegacia.length === 0) {
-        srvSelect.innerHTML = '<option value="" disabled>Nenhum servidor participante nesta unidade</option>';
+        srvSelect.innerHTML = '<option value="" disabled>Nenhum servidor participante nesta unidade ou consórcio</option>';
         return;
       }
 
@@ -3536,7 +3585,7 @@ Deseja confirmar o lançamento mesmo assim?`)) {
 
       if (demais.length > 0) {
         const optgroupD = document.createElement('optgroup');
-        optgroupD.label = `--- DEMAIS SERVIDORES DA UNIDADE ---`;
+        optgroupD.label = `--- DEMAIS SERVIDORES DA UNIDADE/CONSÓRCIO ---`;
         demais.forEach(s => {
           optgroupD.innerHTML += `<option value="${s.id}">${getServidorDisplayName(s)} (${s.funcaoDP || 'PLANTONISTA'})</option>`;
         });
@@ -3822,6 +3871,7 @@ Deseja confirmar o lançamento mesmo assim?`)) {
         renderCentralVigentesTable();
         renderCalendar();
         suggestNextCentralShift();
+        populateSobreavisoDelegaciaDropdowns();
       }
     }
 
@@ -4099,6 +4149,7 @@ Deseja confirmar o lançamento mesmo assim?`)) {
       renderCentralVigentesTable();
       renderFeriasTable();
       suggestNextCentralShift();
+        populateSobreavisoDelegaciaDropdowns();
 
       const selectServidor = document.getElementById('assign-servidor-m');
       if (selectServidor) selectServidor.selectedIndex = -1;
@@ -4144,6 +4195,7 @@ Deseja confirmar o lançamento mesmo assim?`)) {
         renderCalendar();
         renderCentralVigentesTable();
         suggestNextCentralShift();
+        populateSobreavisoDelegaciaDropdowns();
         addAuditLog('Exclusão Parcial Central', `Removidos ${removedCount} plantões a partir de ${dateStr}`);
         alert(`Sucesso! ${removedCount} plantões foram removidos.`);
       }
@@ -5303,6 +5355,7 @@ function processCsvEscalasApprox(lines) {
       renderCentralVigentesTable();
       renderFeriasTable();
       suggestNextCentralShift();
+        populateSobreavisoDelegaciaDropdowns();
       populateAssignServidorDropdown();
       populateLoginUserSelect();
 
@@ -5716,6 +5769,7 @@ function findServidorByApproxName(rawName) {
         renderCalendar();
         renderCentralVigentesTable();
         suggestNextCentralShift();
+        populateSobreavisoDelegaciaDropdowns();
       }
     }
 
@@ -6438,14 +6492,54 @@ function findServidorByApproxName(rawName) {
       const container = document.getElementById('unificado-delegacias-checkboxes');
       if (!container) return;
 
-      container.innerHTML = appState.delegacias.map(d => `
-        <label class="flex items-center gap-2 text-xs py-1 border-b border-slate-200">
+      let html = '<div class="space-y-3">';
+      
+      // Seleção de Unidades para Novo Consórcio
+      html += '<span class="font-bold text-slate-700 block border-b pb-1">1. Selecione as Delegacias para Unificar:</span>';
+      html += appState.delegacias.map(d => `
+        <label class="flex items-center gap-2 text-xs py-1">
           <input type="checkbox" class="plantao-unificado-cb" value="${d.id}" class="rounded text-emerald-600">
           <span class="font-bold text-slate-800">${d.nome.toUpperCase()}</span>
         </label>
       `).join('');
 
+      // Lista de Consórcios Ativos com Botão para Reverter/Excluir
+      if (appState.plantonsUnificados && appState.plantonsUnificados.length > 0) {
+        html += '<span class="font-bold text-slate-700 block border-b pt-3 pb-1">2. Unificações Vigentes (Clique para Reverter):</span>';
+        html += '<div class="space-y-1.5 max-h-36 overflow-y-auto custom-scrollbar">';
+        appState.plantonsUnificados.forEach(p => {
+          html += `
+            <div class="flex items-center justify-between p-2 bg-emerald-50 rounded border border-emerald-200">
+              <span class="font-bold text-emerald-950 text-[11px]">🤝 ${p.nome}</span>
+              <button type="button" onclick="deletePlantaoUnificado('${p.id}')" class="bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold px-2 py-0.5 rounded shadow-2xs">
+                Reverter União
+              </button>
+            </div>
+          `;
+        });
+        html += '</div>';
+      }
+
+      html += '</div>';
+      container.innerHTML = html;
+
       ModalManager.open('modal-plantao-unificado');
+    }
+
+    function deletePlantaoUnificado(idConsorcio) {
+      const p = appState.plantonsUnificados.find(item => item.id === idConsorcio);
+      if (!p) return;
+
+      if (confirm(`Confirma a reversão do Plantão Unificado?
+
+Consórcio: "${p.nome}"`)) {
+        appState.plantonsUnificados = appState.plantonsUnificados.filter(item => item.id !== idConsorcio);
+        saveState();
+        populateSobreavisoDelegaciaDropdowns();
+        openPlantaoUnificadoModal();
+        addAuditLog('Reversão de Plantão Unificado', `Desfeita a união: ${p.nome}`);
+        alert('Consórcio desfeito e delegacias desvinculadas com sucesso!');
+      }
     }
 
     function handleSavePlantaoUnificado(e) {
