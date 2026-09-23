@@ -1984,7 +1984,17 @@
       }
     }
 
-window.addEventListener('DOMContentLoaded', () => {
+
+    // LOGOFF AUTOMÁTICO AO FECHAR A ABA OU NAVEGADOR
+    window.addEventListener('beforeunload', () => {
+      if (typeof appState !== 'undefined') {
+        appState.currentUserServidorId = null;
+        appState.profile = 'VISUALIZADOR';
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
+      }
+    });
+    
+    window.addEventListener('DOMContentLoaded', () => {
       loadState();
       ensureAdminUserExists();
 
@@ -4215,7 +4225,7 @@ Deseja confirmar o lançamento mesmo assim?`)) {
         
         if (newPassword) {
           const passHash = await hashPassword(newPassword);
-          srv.password = passHash;
+          srv.password = null; // GARANTE QUE A PALAVRA-PASSE NUNCA VAZA PARA O GLOBALSTATE
 
           if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
             try {
