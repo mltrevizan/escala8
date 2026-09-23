@@ -2267,8 +2267,26 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
         }
       };
 
-      // Validação prioritária da senha do servidor ou da senha padrão de primeiro acesso
-      const isValidPassword = (srv.password && password === srv.password) || (!srv.password && password === SENHA_PADRAO_PRIMEIRO_ACESSO) || (password === SENHA_PADRAO_PRIMEIRO_ACESSO);
+      // BUSCA A PALAVRA-PASSE NO DOCUMENTO INDIVIDUAL DO FIRESTORE
+      let remoteHash = null;
+      if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
+        try {
+          const db = firebase.firestore();
+          const credDoc = await db.collection('credenciais').doc(srv.id).get();
+          if (credDoc.exists) {
+            remoteHash = credDoc.data().hash;
+          }
+        } catch (e) {
+          console.log('Consulta a credenciais individuais:', e);
+        }
+      }
+
+      const inputHash = await hashPassword(password);
+      const activeHash = remoteHash || srv.password;
+
+      const isValidPassword = (activeHash && inputHash === activeHash) || 
+                              (!activeHash && password === SENHA_PADRAO_PRIMEIRO_ACESSO) || 
+                              (password === SENHA_PADRAO_PRIMEIRO_ACESSO);
 
       if (isValidPassword) {
         executeLocalLogin();
@@ -4168,19 +4186,37 @@ Deseja confirmar o lançamento mesmo assim?`)) {
       const srv = appState.servidores.find(s => s.id === id);
       if (srv) {
         srv.login = newLogin;
+        
         if (newPassword) {
-          srv.password = await hashPassword(newPassword);
-          // Sincroniza a nova senha no Firebase Auth se o usuário estiver logado
-          if (typeof firebase !== 'undefined' && firebase.auth && firebase.auth().currentUser) {
-            firebase.auth().currentUser.updatePassword(newPassword).catch(err => {
-              console.log('Senha atualizada na base local/Firestore. Nota do Auth:', err.message);
-            });
+          const passHash = await hashPassword(newPassword);
+          srv.password = passHash;
+
+          if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
+            try {
+              const db = firebase.firestore();
+              await db.collection('credenciais').doc(id).set({
+                servidorId: id,
+                login: newLogin,
+                hash: passHash,
+                updatedAt: new Date().toISOString()
+              });
+              console.log(`Palavra-passe individual salva no Firestore para ${srv.nome}`);
+
+              if (firebase.auth && firebase.auth().currentUser) {
+                firebase.auth().currentUser.updatePassword(newPassword).catch(err => {
+                  console.log('Atualização de Auth:', err.message);
+                });
+              }
+            } catch (err) {
+              console.error('Erro ao salvar credencial individualizada:', err);
+            }
           }
         }
+
         saveState();
         renderServidoresTable();
         populateLoginUserSelect();
-        addAuditLog('Alteração de Credenciais', `Login/Senha de ${srv.nome} atualizados`);
+        addAuditLog('Alteração de Credenciais', `Login/Senha de ${srv.nome} atualizados individualmente`);
         ModalManager.close('modal-manage-login');
         alert(`Credenciais do servidor ${srv.nome} atualizadas com sucesso!`);
       }
