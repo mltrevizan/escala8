@@ -2103,30 +2103,37 @@
       loadState();
       ensureAdminUserExists();
 
-      // GARANTIA DE ACESSO PÚBLICO: Qualquer nova sessão inicia como VISUALIZADOR
       appState.currentUserServidorId = null;
       appState.profile = 'VISUALIZADOR';
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(appState)); } catch(e){}
 
       setupTooltipEvents();
 
+      // Renderização síncrona e imediata para garantir que o calendário carrega sempre
+      renderAllViews();
+
+      // Sincronização remota via Firestore em segundo plano
       loadStateFromFirestore(() => {
-        renderCurrentProfile();
-        renderCalendar();
-        renderServidoresTable();
-        renderSubdivisoesCards();
-        renderFeriadosTable();
-        renderFeriasTable();
-        renderSobreavisoTable();
-        renderCentralVigentesTable();
-        updateDelegaciaDropdowns();
-        populateAssignServidorDropdown();
-        populateLoginUserSelect();
-        populateServidorFilters();
-        suggestNextCentralShift();
-        populateSobreavisoDelegaciaDropdowns();
+        renderAllViews();
       });
     });
+
+    function renderAllViews() {
+      renderCurrentProfile();
+      renderCalendar();
+      renderServidoresTable();
+      renderSubdivisoesCards();
+      renderFeriadosTable();
+      renderFeriasTable();
+      renderSobreavisoTable();
+      renderCentralVigentesTable();
+      updateDelegaciaDropdowns();
+      populateAssignServidorDropdown();
+      populateLoginUserSelect();
+      populateServidorFilters();
+      suggestNextCentralShift();
+      populateSobreavisoDelegaciaDropdowns();
+    }
 
     function ensureAdminUserExists() {
       let adminSrv = appState.servidores.find(s => s.login === 'admin' || s.id === DEFAULT_DEV_ADMIN_ID);
@@ -2644,6 +2651,7 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
 
     function onDelegaciaSelectionChange() {
       renderSobreavisoTable();
+      populateServidoresDelegaciaForm();
       suggestNextSobreavisoShift();
     }
 
@@ -3067,6 +3075,269 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       alert('Escala da Delegacia salva com sucesso!');
     }
   
+    
+    function renderCentralVigentesTable() {
+      const tbody = document.getElementById('central-vigentes-table-body');
+      if (!tbody) return;
+      
+      const filterText = (document.getElementById('filter-central-vigentes')?.value || '').toLowerCase();
+      let list = [...appState.escalas];
+
+      if (filterText) {
+        list = list.filter(e => {
+          const srv = appState.servidores.find(s => s.id === e.servidorId);
+          const srvName = srv ? srv.nome.toLowerCase() : '';
+          return e.data.includes(filterText) || e.periodo.toLowerCase().includes(filterText) || srvName.includes(filterText);
+        });
+      }
+
+      list.sort((a, b) => b.data.localeCompare(a.data));
+
+      renderTableGeneric('central-vigentes-table-body', list, (e) => {
+        const srv = appState.servidores.find(s => s.id === e.servidorId);
+        const del = srv ? appState.delegacias.find(d => d.id === srv.delegaciaId) : null;
+        const [y, m, d] = e.data.split('-');
+
+        return `
+          <td class="py-2 px-3 font-semibold">${d}/${m}/${y}</td>
+          <td class="py-2 px-3 font-bold ${e.periodo === 'DIURNO' ? 'text-amber-800' : 'text-indigo-800'}">${e.periodo}</td>
+          <td class="py-2 px-3"><span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${e.extrajornada ? 'bg-purple-100 text-purple-800' : 'bg-slate-100 text-slate-700'}">${e.extrajornada ? 'EXTRA' : 'REGULAR'}</span></td>
+          <td class="py-2 px-3 font-bold">${srv ? getServidorDisplayName(srv) : '-'}</td>
+          <td class="py-2 px-3 text-slate-600">${del ? del.nome.toUpperCase() : '-'}</td>
+          <td class="py-2 px-3 text-center">
+            <button onclick="deleteCentralShift('${e.id}')" class="text-red-600 hover:text-red-800 font-bold" title="Excluir Plantão"><i class="fa-solid fa-trash"></i></button>
+          </td>
+        `;
+      }, 'Nenhum lançamento encontrado na Central de Flagrantes.');
+    }
+
+    function deleteCentralShift(id) {
+      if (confirm('Deseja remover este plantão da Central de Flagrantes?')) {
+        const item = appState.escalas.find(e => e.id === id);
+        appState.escalas = appState.escalas.filter(e => e.id !== id);
+        saveState();
+        renderCalendar();
+        renderCentralVigentesTable();
+        if (item) addAuditLog('Exclusão Plantão Central', `Removido plantão de ${item.data} (${item.periodo})`);
+      }
+    }
+
+    function renderSobreavisoTable() {
+      const tbody = document.getElementById('sobreaviso-table-body');
+      if (!tbody) return;
+
+      const selectedDelId = document.getElementById('gestao-sobreaviso-delegacia')?.value;
+      const filterText = (document.getElementById('filter-sobreaviso-vigentes')?.value || '').toLowerCase();
+
+      let list = appState.sobreavisos.filter(s => s.delegaciaId === selectedDelId);
+
+      if (filterText) {
+        list = list.filter(sb => {
+          const srvNames = sb.servidoresIds.map(id => {
+            const s = appState.servidores.find(srv => srv.id === id);
+            return s ? s.nome.toLowerCase() : '';
+          }).join(' ');
+          return (sb.modalidade || '').toLowerCase().includes(filterText) || sb.inicio.includes(filterText) || srvNames.includes(filterText);
+        });
+      }
+
+      list.sort((a, b) => b.inicio.localeCompare(a.inicio));
+
+      renderTableGeneric('sobreaviso-table-body', list, (sb) => {
+        const srvNames = sb.servidoresIds.map(id => {
+          const s = appState.servidores.find(srv => srv.id === id);
+          return s ? getServidorDisplayName(s) : id;
+        }).join(', ');
+
+        const [dIn, tIn] = sb.inicio.split('T'); const [yI, mI, dayI] = dIn.split('-');
+        const [dOut, tOut] = sb.fim.split('T'); const [yO, mO, dayO] = dOut.split('-');
+
+        return `
+          <td class="py-2 px-3 font-bold text-emerald-900">${sb.modalidade || 'SOBREAVISO'}</td>
+          <td class="py-2 px-3 font-semibold">${dayI}/${mI}/${yI} ${tIn || ''}</td>
+          <td class="py-2 px-3 font-semibold">${dayO}/${mO}/${yO} ${tOut || ''}</td>
+          <td class="py-2 px-3 font-bold text-slate-800">${srvNames}</td>
+          <td class="py-2 px-3 font-mono text-slate-600">${sb.viatura || '-'}</td>
+          <td class="py-2 px-3 text-center">
+            <button onclick="deleteSobreavisoShift('${sb.id}')" class="text-red-600 hover:text-red-800 font-bold" title="Excluir Lançamento"><i class="fa-solid fa-trash"></i></button>
+          </td>
+        `;
+      }, 'Nenhum lançamento vigente para a delegacia selecionada.');
+    }
+
+    function deleteSobreavisoShift(id) {
+      if (confirm('Deseja excluir este lançamento de escala da Delegacia?')) {
+        appState.sobreavisos = appState.sobreavisos.filter(sb => sb.id !== id);
+        saveState();
+        renderSobreavisoTable();
+        renderCalendar();
+        addAuditLog('Exclusão Escala Delegacia', `Removido lançamento da delegacia.`);
+      }
+    }
+
+    function populateServidoresDelegaciaForm() {
+      const select = document.getElementById('sobreaviso-servidores');
+      if (!select) return;
+      select.innerHTML = '';
+
+      const delId = document.getElementById('gestao-sobreaviso-delegacia')?.value;
+      if (!delId) return;
+
+      const mod = document.getElementById('sobreaviso-modalidade')?.value || 'SOBREAVISO';
+
+      // 1. Policiais da Lotação Direta
+      let srvs = appState.servidores.filter(s => s.delegaciaId === delId && (s.funcaoDP || 'PLANTONISTA') !== 'NÃO PARTICIPA');
+
+      // 2. Inclusão dos Servidores de Exceção/Reforço cadastrados para esta unidade
+      const excecoesIds = (appState.excecoesDelegacias && appState.excecoesDelegacias[delId]) ? appState.excecoesDelegacias[delId] : [];
+      excecoesIds.forEach(exId => {
+        const sEx = appState.servidores.find(s => s.id === exId);
+        if (sEx && !srvs.some(s => s.id === exId)) {
+          srvs.push(sEx);
+        }
+      });
+
+      if (srvs.length === 0) {
+        select.innerHTML = '<option value="" disabled>Nenhum policial vinculado a esta delegacia.</option>';
+        return;
+      }
+
+      srvs.forEach(srv => {
+        const isExcecao = excecoesIds.includes(srv.id);
+        const excecaoTag = isExcecao ? ' [REFORÇO/EXCEÇÃO]' : '';
+        select.innerHTML += `<option value="${srv.id}">${getServidorDisplayName(srv)} (${srv.funcaoDP || 'PLANTONISTA'})${excecaoTag}</option>`;
+      });
+    }
+
+    function expandVigentesModal(mode) {
+      currentModalExpandMode = mode;
+      document.getElementById('modal-expand-title').textContent = mode === 'CENTRAL' ? 'Lançamentos Vigentes - Central de Flagrantes' : 'Lançamentos Vigentes - Delegacias';
+      renderModalExpandTable();
+      ModalManager.open('modal-expand-vigentes');
+    }
+
+    function renderModalExpandTable() {
+      const thead = document.getElementById('modal-expand-thead');
+      const tbody = document.getElementById('modal-expand-tbody');
+      const countLabel = document.getElementById('modal-expand-count');
+      const searchVal = (document.getElementById('modal-expand-search')?.value || '').toLowerCase();
+
+      if (!thead || !tbody) return;
+
+      if (currentModalExpandMode === 'CENTRAL') {
+        thead.innerHTML = `<tr><th class="py-2.5 px-3">Data</th><th class="py-2.5 px-3">Turno</th><th class="py-2.5 px-3">Tipo</th><th class="py-2.5 px-3">Servidor</th><th class="py-2.5 px-3">Unidade Origem</th><th class="py-2.5 px-3 text-center">Ação</th></tr>`;
+        let list = [...appState.escalas];
+        if (searchVal) {
+          list = list.filter(e => {
+            const srv = appState.servidores.find(s => s.id === e.servidorId);
+            return e.data.includes(searchVal) || e.periodo.toLowerCase().includes(searchVal) || (srv && srv.nome.toLowerCase().includes(searchVal));
+          });
+        }
+        list.sort((a, b) => b.data.localeCompare(a.data));
+        countLabel.textContent = `${list.length} registros`;
+
+        renderTableGeneric('modal-expand-tbody', list, (e) => {
+          const srv = appState.servidores.find(s => s.id === e.servidorId);
+          const del = srv ? appState.delegacias.find(d => d.id === srv.delegaciaId) : null;
+          const [y, m, d] = e.data.split('-');
+          return `
+            <td class="py-2.5 px-3 font-semibold">${d}/${m}/${y}</td>
+            <td class="py-2.5 px-3 font-bold ${e.periodo === 'DIURNO' ? 'text-amber-800' : 'text-indigo-800'}">${e.periodo}</td>
+            <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded text-[10px] font-bold ${e.extrajornada ? 'bg-purple-100 text-purple-800' : 'bg-slate-100 text-slate-700'}">${e.extrajornada ? 'EXTRA' : 'REGULAR'}</span></td>
+            <td class="py-2.5 px-3 font-bold">${srv ? getServidorDisplayName(srv) : '-'}</td>
+            <td class="py-2.5 px-3 text-slate-600">${del ? del.nome.toUpperCase() : '-'}</td>
+            <td class="py-2.5 px-3 text-center"><button onclick="deleteCentralShift('${e.id}'); renderModalExpandTable();" class="text-red-600 hover:text-red-800 font-bold"><i class="fa-solid fa-trash"></i></button></td>
+          `;
+        }, 'Nenhum registro encontrado.');
+      } else {
+        thead.innerHTML = `<tr><th class="py-2.5 px-3">Modalidade</th><th class="py-2.5 px-3">Delegacia</th><th class="py-2.5 px-3">Início</th><th class="py-2.5 px-3">Fim</th><th class="py-2.5 px-3">Servidores</th><th class="py-2.5 px-3">Viatura</th><th class="py-2.5 px-3 text-center">Ação</th></tr>`;
+        let list = [...appState.sobreavisos];
+        if (searchVal) {
+          list = list.filter(sb => {
+            const del = appState.delegacias.find(d => d.id === sb.delegaciaId);
+            const delName = del ? del.nome.toLowerCase() : '';
+            const srvNames = sb.servidoresIds.map(id => { const s = appState.servidores.find(srv => srv.id === id); return s ? s.nome.toLowerCase() : ''; }).join(' ');
+            return delName.includes(searchVal) || srvNames.includes(searchVal) || sb.inicio.includes(searchVal);
+          });
+        }
+        list.sort((a, b) => b.inicio.localeCompare(a.inicio));
+        countLabel.textContent = `${list.length} registros`;
+
+        renderTableGeneric('modal-expand-tbody', list, (sb) => {
+          const del = appState.delegacias.find(d => d.id === sb.delegaciaId);
+          const srvNames = sb.servidoresIds.map(id => { const s = appState.servidores.find(srv => srv.id === id); return s ? getServidorDisplayName(s) : id; }).join(', ');
+          const [dIn, tIn] = sb.inicio.split('T'); const [yI, mI, dayI] = dIn.split('-');
+          const [dOut, tOut] = sb.fim.split('T'); const [yO, mO, dayO] = dOut.split('-');
+          return `
+            <td class="py-2.5 px-3 font-bold text-emerald-900">${sb.modalidade || 'SOBREAVISO'}</td>
+            <td class="py-2.5 px-3 font-bold text-slate-800">${del ? del.nome.toUpperCase() : '-'}</td>
+            <td class="py-2.5 px-3 font-semibold">${dayI}/${mI}/${yI} ${tIn || ''}</td>
+            <td class="py-2.5 px-3 font-semibold">${dayO}/${mO}/${yO} ${tOut || ''}</td>
+            <td class="py-2.5 px-3 font-bold text-slate-800">${srvNames}</td>
+            <td class="py-2.5 px-3 font-mono text-slate-600">${sb.viatura || '-'}</td>
+            <td class="py-2.5 px-3 text-center"><button onclick="deleteSobreavisoShift('${sb.id}'); renderModalExpandTable();" class="text-red-600 hover:text-red-800 font-bold"><i class="fa-solid fa-trash"></i></button></td>
+          `;
+        }, 'Nenhum registro encontrado.');
+      }
+    }
+  
+    
+    
+    function purgeEscalaFromDateModal() {
+      const dateVal = document.getElementById('purge-from-date-m')?.value;
+      if (!dateVal) {
+        alert('Selecione uma data para realizar a exclusão.');
+        return;
+      }
+      if (confirm(`Confirma a exclusão de TODOS os plantões da Central de Flagrantes a partir do dia ${dateVal}?`)) {
+        const initialCount = appState.escalas.length;
+        appState.escalas = appState.escalas.filter(e => e.data < dateVal);
+        const removed = initialCount - appState.escalas.length;
+        saveState();
+        renderCalendar();
+        renderCentralVigentesTable();
+        addAuditLog('Exclusão Parcial Central', `Removidos ${removed} plantões a partir de ${dateVal}`);
+        alert(`${removed} plantão(ões) removido(s) com sucesso.`);
+      }
+    }
+
+    function purgeEscalaDelegaciaFromDate() {
+      const delId = document.getElementById('gestao-sobreaviso-delegacia')?.value;
+      const dateVal = document.getElementById('purge-delegacia-from-date')?.value;
+      if (!delId || !dateVal) {
+        alert('Selecione a delegacia e a data de início para exclusão.');
+        return;
+      }
+      if (confirm(`Confirma a exclusão de todos os lançamentos desta delegacia a partir do dia ${dateVal}?`)) {
+        const initialCount = appState.sobreavisos.length;
+        appState.sobreavisos = appState.sobreavisos.filter(sb => {
+          if (sb.delegaciaId !== delId) return true;
+          return sb.inicio.substring(0, 10) < dateVal;
+        });
+        const removed = initialCount - appState.sobreavisos.length;
+        saveState();
+        renderSobreavisoTable();
+        renderCalendar();
+        addAuditLog('Exclusão Parcial Delegacia', `Removidos ${removed} lançamentos a partir de ${dateVal}`);
+        alert(`${removed} lançamento(s) de escala removido(s) com sucesso.`);
+      }
+    }
+
+    function confirmPurgeEscalaDelegacia() {
+      const delId = document.getElementById('gestao-sobreaviso-delegacia')?.value;
+      if (!delId) return;
+      if (confirm("ATENÇÃO: Deseja apagar TODOS os lançamentos de escala da delegacia selecionada?")) {
+        const initialCount = appState.sobreavisos.length;
+        appState.sobreavisos = appState.sobreavisos.filter(sb => sb.delegaciaId !== delId);
+        const removed = initialCount - appState.sobreavisos.length;
+        saveState();
+        renderSobreavisoTable();
+        renderCalendar();
+        addAuditLog('Exclusão Total Delegacia', `Limpos todos os lançamentos da delegacia.`);
+        alert('Escala da delegacia limpa com sucesso!');
+      }
+    }
+
     function setupTooltipEvents() {
       const tooltip = document.getElementById('global-tooltip');
       document.addEventListener('mousemove', (e) => {
