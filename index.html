@@ -2044,7 +2044,9 @@
           primeiroAcesso: false
         };
         appState.servidores.unshift(adminSrv);
-        // saveState() removido aqui para evitar sobrescrever a nuvem antes do carregamento inicial
+      } else {
+        // CORREÇÃO ESTRITA: Garante a restauração incondicional do acesso ADMINISTRADOR
+        adminSrv.nivelAcesso = 'ADMINISTRADOR';
       }
     }
 
@@ -3049,6 +3051,10 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       apjSubSelect.innerHTML = '<option value="NAO_MODIFICADO" selected>NÃO MODIFICADO (MANTER APJ PREVIAMENTE ESCALADO)</option>';
 
       appState.servidores.forEach(srv => {
+        // Oculta a conta do Administrador do sistema no select de substitutos se não for o próprio Admin
+        if (appState.profile !== 'ADMINISTRADOR' && (srv.login === 'admin' || srv.id === DEFAULT_DEV_ADMIN_ID || srv.nivelAcesso === 'ADMINISTRADOR')) {
+          return;
+        }
         if (srv.cargo === 'DELEGADO') {
           delSubSelect.innerHTML += `<option value="${srv.id}">${getServidorDisplayName(srv)} (${formatPhoneNumber(srv.telefone)})</option>`;
         } else if (srv.cargo === 'APJ') {
@@ -4148,12 +4154,13 @@ Deseja confirmar o lançamento mesmo assim?`)) {
       if (srv) {
         srv.funcaoDP = novaFuncao;
 
-        // Se a Função DP for SUPERINTENDENTE, eleva o perfil de acesso do servidor
-        if (novaFuncao === 'SUPERINTENDENTE') {
-          srv.nivelAcesso = 'SUPERINTENDENTE';
-        } else if (srv.cargo === 'APJ' && srv.nivelAcesso === 'SUPERINTENDENTE') {
-          // Se deixar de ser Superintendente, retorna para o perfil padrão APJ
-          srv.nivelAcesso = 'APJ';
+        // Se a Função DP for SUPERINTENDENTE, eleva o perfil (exceto para Administradores)
+        if (srv.nivelAcesso !== 'ADMINISTRADOR' && srv.login !== 'admin') {
+          if (novaFuncao === 'SUPERINTENDENTE') {
+            srv.nivelAcesso = 'SUPERINTENDENTE';
+          } else if (srv.cargo === 'APJ' && srv.nivelAcesso === 'SUPERINTENDENTE') {
+            srv.nivelAcesso = 'APJ';
+          }
         }
 
         saveState();
@@ -4266,6 +4273,7 @@ Deseja confirmar o lançamento mesmo assim?`)) {
               }
             } catch (err) {
               console.error('Erro ao salvar credencial individualizada:', err);
+              alert('Aviso: Não foi possível sincronizar a nova senha na nuvem devido a uma falha de conexão. Verifique sua rede.');
             }
           }
         }
@@ -4290,11 +4298,17 @@ Deseja confirmar o lançamento mesmo assim?`)) {
         return;
       }
 
-      // REGRA DE RESTRIÇÃO DO COORDENADOR: Não pode resetar outros Coordenadores nem Administradores
+      // BLOQUEIO ABSOLUTO: Coordenadores nunca podem resetar a senha do Administrador
+      const isTargetAdmin = (srv.nivelAcesso === 'ADMINISTRADOR' || srv.login === 'admin' || srv.id === DEFAULT_DEV_ADMIN_ID);
+      
       if (appState.profile === 'COORDENADOR') {
+        if (isTargetAdmin) {
+          alert('Permissão negada: Coordenadores não possuem autorização para resetar a senha do Administrador do Sistema.');
+          return;
+        }
         const targetAccess = srv.nivelAcesso || (srv.cargo === 'DELEGADO' ? 'DELEGADO' : 'APJ');
-        if (targetAccess === 'ADMINISTRADOR' || targetAccess === 'COORDENADOR') {
-          alert('Permissão negada: Coordenadores não podem resetar as senhas de Administradores ou de outros Coordenadores.');
+        if (targetAccess === 'COORDENADOR') {
+          alert('Permissão negada: Coordenadores não podem resetar as senhas de outros Coordenadores.');
           return;
         }
       }
@@ -4317,7 +4331,7 @@ Deseja confirmar o lançamento mesmo assim?`)) {
         populateLoginUserSelect();
         addAuditLog('Reset de Senha', `Senha de ${srv.nome} resetada para a senha padrão por ${appState.profile}`);
         ModalManager.close('modal-manage-login');
-        alert(`Senha do servidor ${srv.nome} resetada com sucesso para o padrão de primeiro acesso (Central123).`);
+        alert(`Senha do servidor ${srv.nome} resetada com sucesso para a senha padrão de primeiro acesso.`);
       }
     }
 
@@ -4362,6 +4376,11 @@ Deseja confirmar o lançamento mesmo assim?`)) {
 
     function renderServidoresTable() {
       let list = [...appState.servidores];
+
+      // BLOQUEIO VISUAL: O Administrador só é exibido na lista para o próprio Administrador logado
+      if (appState.profile !== 'ADMINISTRADOR') {
+        list = list.filter(s => s.login !== 'admin' && s.id !== DEFAULT_DEV_ADMIN_ID && s.nivelAcesso !== 'ADMINISTRADOR');
+      }
 
       const searchTerm = document.getElementById('search-servidor')?.value.toLowerCase().trim() || '';
       const filterSdp = document.getElementById('filter-servidor-sdp')?.value || 'ALL';
@@ -4909,7 +4928,9 @@ function updateDelegaciaDropdowns() {
       const funcaoCRF = document.getElementById('servidor-funcao-crf').value || 'ROTATIVO';
       const funcaoDP = document.getElementById('servidor-funcao-dp').value || 'PLANTONISTA';
 
-      if (funcaoDP === 'SUPERINTENDENTE') {
+      if (id === DEFAULT_DEV_ADMIN_ID || (id && appState.servidores.find(s => s.id === id && s.login === 'admin'))) {
+        nivelAcesso = 'ADMINISTRADOR'; // Impede auto-limitação ou rebaixamento do Admin
+      } else if (funcaoDP === 'SUPERINTENDENTE') {
         nivelAcesso = 'SUPERINTENDENTE';
       } else if ((nivelAcesso === 'ADMINISTRADOR' || nivelAcesso === 'COORDENADOR') && appState.profile !== 'ADMINISTRADOR') {
         nivelAcesso = (cargo === 'DELEGADO') ? 'DELEGADO' : 'APJ';
