@@ -2371,10 +2371,11 @@
         appState.profile = srv.nivelAcesso || (srv.cargo === 'DELEGADO' ? 'DELEGADO' : 'APJ');
 
         if (srv.delegaciaId) {
+          const targetId = getConsorcioIdForDelegacia(srv.delegaciaId) || srv.delegaciaId;
           const selectGestaoDel = document.getElementById('gestao-sobreaviso-delegacia');
           const selectFilterDel = document.getElementById('filter-delegacia-mode');
-          if (selectGestaoDel) selectGestaoDel.value = srv.delegaciaId;
-          if (selectFilterDel) selectFilterDel.value = srv.delegaciaId;
+          if (selectGestaoDel) selectGestaoDel.value = targetId;
+          if (selectFilterDel) selectFilterDel.value = targetId;
         }
 
         if (srv.sdpId) {
@@ -2575,6 +2576,13 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       renderCalendar();
     }
 
+    
+    function getConsorcioIdForDelegacia(delegaciaId) {
+      if (!delegaciaId || !appState.plantonsUnificados) return null;
+      const unif = appState.plantonsUnificados.find(p => p.delegaciasIds && p.delegaciasIds.includes(delegaciaId));
+      return unif ? unif.id : null;
+    }
+  
     function populateSobreavisoDelegaciaDropdowns(isInitialLoad = false) {
       const selectHeader = document.getElementById('filter-delegacia-mode');
       const selectGestao = document.getElementById('gestao-sobreaviso-delegacia');
@@ -2591,9 +2599,9 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
 
       let optionsHTML = '';
 
-      // 1. Plantões Unificados / Consórcios (Prioridade no topo)
+      // 1. Plantões Unificados (Prioridade no topo)
       if (appState.plantonsUnificados && appState.plantonsUnificados.length > 0) {
-        optionsHTML += '<optgroup label="--- PLANTÕES UNIFICADOS / CONSÓRCIOS ---">';
+        optionsHTML += '<optgroup label="--- PLANTÕES UNIFICADOS ---">';
         appState.plantonsUnificados.forEach(p => {
           optionsHTML += `<option value="${p.id}">🤝 ${p.nome.toUpperCase()}</option>`;
         });
@@ -2622,7 +2630,7 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
         let gestaoOptions = '';
 
         if (appState.plantonsUnificados && appState.plantonsUnificados.length > 0) {
-          gestaoOptions += '<optgroup label="--- PLANTÕES UNIFICADOS / CONSÓRCIOS ---">';
+          gestaoOptions += '<optgroup label="--- PLANTÕES UNIFICADOS ---">';
           appState.plantonsUnificados.forEach(p => {
             gestaoOptions += `<option value="${p.id}">🤝 ${p.nome.toUpperCase()}</option>`;
           });
@@ -2637,7 +2645,7 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
               let canAdd = false;
               if (appState.profile === 'ADMINISTRADOR' || scope === 'TODOS') canAdd = true;
               else if (scope === 'SUBDIVISAO' && activeUser && d.sdpId === activeUser.sdpId) canAdd = true;
-              else if (scope === 'DELEGACIA' && activeUser && d.id === activeUser.delegaciaId) canAdd = true;
+              else if (scope === 'DELEGACIA' && activeUser && (d.id === activeUser.delegaciaId || (d.delegaciasIds && d.delegaciasIds.includes(activeUser.delegaciaId)))) canAdd = true;
 
               if (canAdd) gestaoOptions += `<option value="${d.id}">${d.nome.toUpperCase()}</option>`;
             });
@@ -2946,13 +2954,23 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
           });
         } else {
           const matches = appState.sobreavisos.filter(sb => {
-            if (sb.delegaciaId !== selectedDelId) return false;
+            let isTarget = (sb.delegaciaId === selectedDelId);
+            
+            // Se o filtro estiver em uma delegacia individual, busca também consórcios dos quais ela faz parte
+            if (!isTarget && !selectedDelId.startsWith('UNIF_')) {
+              const consorcioId = getConsorcioIdForDelegacia(selectedDelId);
+              if (consorcioId && sb.delegaciaId === consorcioId) isTarget = true;
+            }
+            // Se o filtro estiver em um Plantão Unificado, busca também lançamentos das delegacias participantes
+            if (!isTarget && selectedDelId.startsWith('UNIF_')) {
+              const unifObj = appState.plantonsUnificados ? appState.plantonsUnificados.find(p => p.id === selectedDelId) : null;
+              if (unifObj && unifObj.delegaciasIds && unifObj.delegaciasIds.includes(sb.delegaciaId)) isTarget = true;
+            }
+
+            if (!isTarget) return false;
             const startD = sb.inicio.substring(0, 10);
             const endD = sb.fim.substring(0, 10);
-            
-            // Exibe o registro inclusivamente em todas as datas de vigência (startD até endD)
-            if (dateStr >= startD && dateStr <= endD) return true;
-            return false;
+            return (dateStr >= startD && dateStr <= endD);
           });
 
           // Ordenação Padrão Delegacia: 1º PLANTONISTA, 2º SOBREAVISO
@@ -3191,29 +3209,42 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       const delId = document.getElementById('gestao-sobreaviso-delegacia')?.value;
       if (!delId) return;
 
-      const mod = document.getElementById('sobreaviso-modalidade')?.value || 'SOBREAVISO';
+      let targetDelegaciasIds = [];
 
-      // 1. Policiais da Lotação Direta
-      let srvs = appState.servidores.filter(s => s.delegaciaId === delId && (s.funcaoDP || 'PLANTONISTA') !== 'NÃO PARTICIPA');
-
-      // 2. Inclusão dos Servidores de Exceção/Reforço cadastrados para esta unidade
-      const excecoesIds = (appState.excecoesDelegacias && appState.excecoesDelegacias[delId]) ? appState.excecoesDelegacias[delId] : [];
-      excecoesIds.forEach(exId => {
-        const sEx = appState.servidores.find(s => s.id === exId);
-        if (sEx && !srvs.some(s => s.id === exId)) {
-          srvs.push(sEx);
+      if (delId.startsWith('UNIF_')) {
+        const unifObj = appState.plantonsUnificados ? appState.plantonsUnificados.find(p => p.id === delId) : null;
+        if (unifObj && unifObj.delegaciasIds) {
+          targetDelegaciasIds = unifObj.delegaciasIds;
         }
+      } else {
+        targetDelegaciasIds = [delId];
+      }
+
+      let srvs = appState.servidores.filter(s => 
+        targetDelegaciasIds.includes(s.delegaciaId) && (s.funcaoDP || 'PLANTONISTA') !== 'NÃO PARTICIPA'
+      );
+
+      targetDelegaciasIds.forEach(dId => {
+        const excecoesIds = (appState.excecoesDelegacias && appState.excecoesDelegacias[dId]) ? appState.excecoesDelegacias[dId] : [];
+        excecoesIds.forEach(exId => {
+          const sEx = appState.servidores.find(s => s.id === exId);
+          if (sEx && !srvs.some(s => s.id === exId)) {
+            srvs.push(sEx);
+          }
+        });
       });
 
       if (srvs.length === 0) {
-        select.innerHTML = '<option value="" disabled>Nenhum policial vinculado a esta delegacia.</option>';
+        select.innerHTML = '<option value="" disabled>Nenhum policial vinculado a este plantão unificado.</option>';
         return;
       }
 
+      srvs.sort((a, b) => a.nome.localeCompare(b.nome));
+
       srvs.forEach(srv => {
-        const isExcecao = excecoesIds.includes(srv.id);
-        const excecaoTag = isExcecao ? ' [REFORÇO/EXCEÇÃO]' : '';
-        select.innerHTML += `<option value="${srv.id}">${getServidorDisplayName(srv)} (${srv.funcaoDP || 'PLANTONISTA'})${excecaoTag}</option>`;
+        const delObj = appState.delegacias.find(d => d.id === srv.delegaciaId);
+        const delTag = delId.startsWith('UNIF_') && delObj ? ` [${delObj.nome.toUpperCase()}]` : '';
+        select.innerHTML += `<option value="${srv.id}">${getServidorDisplayName(srv)} (${srv.funcaoDP || 'PLANTONISTA'})${delTag}</option>`;
       });
     }
 
@@ -3262,7 +3293,11 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
         let list = [...appState.sobreavisos];
         if (searchVal) {
           list = list.filter(sb => {
-            const del = appState.delegacias.find(d => d.id === sb.delegaciaId);
+            let del = appState.delegacias.find(d => d.id === sb.delegaciaId);
+          if (!del && sb.delegaciaId.startsWith('UNIF_')) {
+            const unif = appState.plantonsUnificados ? appState.plantonsUnificados.find(p => p.id === sb.delegaciaId) : null;
+            if (unif) del = { nome: unif.nome };
+          }
             const delName = del ? del.nome.toLowerCase() : '';
             const srvNames = sb.servidoresIds.map(id => { const s = appState.servidores.find(srv => srv.id === id); return s ? s.nome.toLowerCase() : ''; }).join(' ');
             return delName.includes(searchVal) || srvNames.includes(searchVal) || sb.inicio.includes(searchVal);
@@ -3272,7 +3307,11 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
         countLabel.textContent = `${list.length} registros`;
 
         renderTableGeneric('modal-expand-tbody', list, (sb) => {
-          const del = appState.delegacias.find(d => d.id === sb.delegaciaId);
+          let del = appState.delegacias.find(d => d.id === sb.delegaciaId);
+          if (!del && sb.delegaciaId.startsWith('UNIF_')) {
+            const unif = appState.plantonsUnificados ? appState.plantonsUnificados.find(p => p.id === sb.delegaciaId) : null;
+            if (unif) del = { nome: unif.nome };
+          }
           const srvNames = sb.servidoresIds.map(id => { const s = appState.servidores.find(srv => srv.id === id); return s ? getServidorDisplayName(s) : id; }).join(', ');
           const [dIn, tIn] = sb.inicio.split('T'); const [yI, mI, dayI] = dIn.split('-');
           const [dOut, tOut] = sb.fim.split('T'); const [yO, mO, dayO] = dOut.split('-');
@@ -4834,7 +4873,11 @@ function onFeriadoEscopoChange() {
         csvContent += "MODALIDADE,DELEGACIA,INICIO,FIM,VIATURA,SERVIDORES\n";
         const selectedDelId = document.getElementById('gestao-sobreaviso-delegacia').value;
         appState.sobreavisos.filter(s => s.delegaciaId === selectedDelId).forEach(sb => {
-          const del = appState.delegacias.find(d => d.id === sb.delegaciaId);
+          let del = appState.delegacias.find(d => d.id === sb.delegaciaId);
+          if (!del && sb.delegaciaId.startsWith('UNIF_')) {
+            const unif = appState.plantonsUnificados ? appState.plantonsUnificados.find(p => p.id === sb.delegaciaId) : null;
+            if (unif) del = { nome: unif.nome };
+          }
           sb.servidoresIds.forEach(id => {
             const s = appState.servidores.find(srv => srv.id === id);
             csvContent += `"${sb.modalidade || 'SOBREAVISO'}","${del ? del.nome : ''}","${sb.inicio}","${sb.fim}","${sb.viatura || ''}","${s ? s.nome : id}"\n`;
@@ -6190,7 +6233,7 @@ Consórcio: "${p.nome}"`)) {
       const selectedIds = Array.from(checkedCbs).map(cb => cb.value);
 
       if (selectedIds.length < 2) {
-        alert('Selecione pelo menos 2 delegacias para formar um Plantão Unificado / Consórcio.');
+        alert('Selecione pelo menos 2 delegacias para formar um Plantão Unificado.');
         return;
       }
 
