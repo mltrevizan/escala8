@@ -94,6 +94,12 @@
     }
 
     .print-only { display: none; }
+    
+    .bg-excecao-laranja {
+      background-color: #ffedd5 !important;
+      border-color: #f97316 !important;
+      color: #9a3412 !important;
+    }
   </style>
 
   <!-- Firebase App & Auth SDKs (v10 Compat) -->
@@ -700,6 +706,7 @@
           <button id="btn-add-sdp" onclick="ModalManager.open('modal-subdivisao', () => document.getElementById('form-subdivisao').reset())" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg text-xs font-semibold shadow-sm flex items-center gap-1.5 transition">
             <i class="fa-solid fa-sitemap"></i> Nova Subdivisão
           </button>
+          <button id="btn-plantao-unificado-del" onclick="openPlantaoUnificadoModal()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-lg text-xs font-semibold shadow-sm flex items-center gap-1.5 transition"><i class="fa-solid fa-link"></i> Plantão Unificado</button>
           <button id="btn-add-delegacia" onclick="openDelegaciaModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg text-xs font-semibold shadow-sm flex items-center gap-1.5 transition">
             <i class="fa-solid fa-building-shield"></i> Nova Delegacia
           </button>
@@ -812,6 +819,72 @@
 
       <div class="p-3 bg-slate-50 border-t border-slate-200 text-right shrink-0">
         <button onclick="ModalManager.close('modal-vincular-apj')" class="px-5 py-2 bg-slate-800 text-white rounded-lg text-xs font-bold hover:bg-slate-700 transition">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  
+  <!-- MODAL PLANTÃO UNIFICADO (CONSÓRCIO) -->
+  <div id="modal-plantao-unificado" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200">
+      <div class="bg-emerald-800 p-4 text-white flex justify-between items-center">
+        <h3 class="font-bold text-sm flex items-center gap-2"><i class="fa-solid fa-link"></i> Configurar Plantão Unificado</h3>
+        <button onclick="ModalManager.close('modal-plantao-unificado')" class="text-slate-300 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <form id="form-plantao-unificado" onsubmit="handleSavePlantaoUnificado(event)" class="p-5 space-y-3 text-xs">
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">Selecione as Delegacias Integrantes do Consórcio:</label>
+          <div id="unificado-delegacias-checkboxes" class="max-h-48 overflow-y-auto border rounded p-2 bg-slate-50 space-y-1"></div>
+        </div>
+        <div class="pt-3 border-t flex justify-end gap-2">
+          <button type="button" onclick="ModalManager.close('modal-plantao-unificado')" class="px-4 py-2 bg-slate-200 text-slate-700 rounded font-semibold">Cancelar</button>
+          <button type="submit" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-bold">Unificar Delegacias</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL ADICIONAR EXCEÇÃO -->
+  <div id="modal-add-excecao" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200">
+      <div class="bg-indigo-900 p-4 text-white flex justify-between items-center">
+        <h3 class="font-bold text-sm flex items-center gap-2"><i class="fa-solid fa-user-plus"></i> Adicionar Servidor de Exceção / Reforço</h3>
+        <button onclick="ModalManager.close('modal-add-excecao')" class="text-slate-300 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <form id="form-add-excecao" onsubmit="handleSaveExcecaoServidor(event)" class="p-5 space-y-3 text-xs">
+        <div>
+          <label class="block font-bold text-slate-700 mb-1">1. Subdivisão (SDP):</label>
+          <select id="excecao-sdp-select" onchange="updateExcecaoDelegaciasDropdown()" class="w-full border rounded p-2 bg-white font-semibold"></select>
+        </div>
+        <div>
+          <label class="block font-bold text-slate-700 mb-1">2. Delegacia de Origem:</label>
+          <select id="excecao-delegacia-select" onchange="updateExcecaoServidoresDropdown()" class="w-full border rounded p-2 bg-white font-semibold"></select>
+        </div>
+        <div>
+          <label class="block font-bold text-slate-700 mb-1">3. Selecione o Servidor:</label>
+          <select id="excecao-servidor-select" required class="w-full border rounded p-2 bg-white font-bold text-indigo-900"></select>
+        </div>
+        <div class="pt-3 border-t flex justify-end gap-2">
+          <button type="button" onclick="ModalManager.close('modal-add-excecao')" class="px-4 py-2 bg-slate-200 text-slate-700 rounded font-semibold">Cancelar</button>
+          <button type="submit" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded font-bold">Incluir Exceção</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL REMOVER EXCEÇÃO -->
+  <div id="modal-remove-excecao" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200">
+      <div class="bg-red-700 p-4 text-white flex justify-between items-center">
+        <h3 class="font-bold text-sm flex items-center gap-2"><i class="fa-solid fa-user-minus"></i> Remover Servidor de Exceção</h3>
+        <button onclick="ModalManager.close('modal-remove-excecao')" class="text-slate-300 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="p-5 space-y-3 text-xs">
+        <span class="font-bold text-slate-700 block">Exceções cadastradas para a delegacia atual:</span>
+        <div id="lista-excecoes-remover" class="max-h-48 overflow-y-auto border rounded p-2 bg-slate-50 space-y-1"></div>
+      </div>
+      <div class="p-3 bg-slate-50 border-t text-right">
+        <button onclick="ModalManager.close('modal-remove-excecao')" class="px-4 py-2 bg-slate-800 text-white rounded font-bold">Fechar</button>
       </div>
     </div>
   </div>
@@ -1806,6 +1879,9 @@
       ferias: [],
       escalas: [],
       sobreavisos: [],
+      plantonsUnificados: [],
+      excecoesDelegacias: {},
+      horariosPorDelegacia: {},
       auditLogs: []
     };
 
@@ -4112,7 +4188,12 @@ Deseja confirmar o lançamento mesmo assim?`)) {
               table { width: 100%; border-collapse: collapse; margin-top: 15px; }
               th, td { border: 1px solid #ccc; padding: 6px; text-align: left; }
               th { background: #f1f5f9; }
-            </style>
+                .bg-excecao-laranja {
+      background-color: #ffedd5 !important;
+      border-color: #f97316 !important;
+      color: #9a3412 !important;
+    }
+  </style>
           </head>
           <body>
             <h2>8ª CENTRAL REGIONAL DE FLAGRANTES - LOG DE MODIFICAÇÕES</h2>
@@ -6344,6 +6425,171 @@ function findServidorByApproxName(rawName) {
       suggestNextSobreavisoShift();
       alert(`Geração concluída com sucesso!\nNovos lançamentos criados: ${generatedCount}`);
     }
+
+    // =========================================================================
+    // LÓGICA V19.1: PLANTÃO UNIFICADO, EXCEÇÕES DE SERVIDORES E HORÁRIOS LOCAIS
+    // =========================================================================
+
+    function openPlantaoUnificadoModal() {
+      if (appState.profile !== 'ADMINISTRADOR' && appState.profile !== 'COORDENADOR') {
+        alert('Apenas Administradores e Coordenadores podem configurar Plantões Unificados.');
+        return;
+      }
+      const container = document.getElementById('unificado-delegacias-checkboxes');
+      if (!container) return;
+
+      container.innerHTML = appState.delegacias.map(d => `
+        <label class="flex items-center gap-2 text-xs py-1 border-b border-slate-200">
+          <input type="checkbox" class="plantao-unificado-cb" value="${d.id}" class="rounded text-emerald-600">
+          <span class="font-bold text-slate-800">${d.nome.toUpperCase()}</span>
+        </label>
+      `).join('');
+
+      ModalManager.open('modal-plantao-unificado');
+    }
+
+    function handleSavePlantaoUnificado(e) {
+      e.preventDefault();
+      const checkedCbs = document.querySelectorAll('.plantao-unificado-cb:checked');
+      const selectedIds = Array.from(checkedCbs).map(cb => cb.value);
+
+      if (selectedIds.length < 2) {
+        alert('Selecione pelo menos 2 delegacias para formar um Plantão Unificado / Consórcio.');
+        return;
+      }
+
+      const idConsorcio = 'UNIF_' + selectedIds.sort().join('_');
+      const nomes = selectedIds.map(id => {
+        const d = appState.delegacias.find(del => del.id === id);
+        return d ? d.nome.toUpperCase() : id;
+      }).join(' / ');
+
+      if (!appState.plantonsUnificados) appState.plantonsUnificados = [];
+
+      const existingIdx = appState.plantonsUnificados.findIndex(p => p.id === idConsorcio);
+      if (existingIdx === -1) {
+        appState.plantonsUnificados.push({ id: idConsorcio, nome: nomes, delegaciasIds: selectedIds });
+      }
+
+      saveState();
+      populateSobreavisoDelegaciaDropdowns();
+      addAuditLog('Plantão Unificado', `Criado consórcio entre: ${nomes}`);
+      ModalManager.close('modal-plantao-unificado');
+      alert(`Plantão Unificado criado com sucesso:
+${nomes}`);
+    }
+
+    function openAddExcecaoModal() {
+      const activeUser = getActiveUserServidor();
+      const scope = getScopePermission('escopoDP');
+      
+      if (appState.profile === 'APJ' || (scope === 'NENHUM' && appState.profile !== 'ADMINISTRADOR')) {
+        alert('Seu perfil de acesso não possui permissão para adicionar servidores de exceção.');
+        return;
+      }
+
+      const sdpSelect = document.getElementById('excecao-sdp-select');
+      if (sdpSelect) {
+        sdpSelect.innerHTML = '<option value="">-- Selecione a SDP --</option>' +
+          appState.sdps.map(s => `<option value="${s.id}">${s.nome.toUpperCase()}</option>`).join('');
+      }
+
+      document.getElementById('excecao-delegacia-select').innerHTML = '<option value="">-- Selecione primeiro a SDP --</option>';
+      document.getElementById('excecao-servidor-select').innerHTML = '<option value="">-- Selecione primeiro a Delegacia --</option>';
+
+      ModalManager.open('modal-add-excecao');
+    }
+
+    function updateExcecaoDelegaciasDropdown() {
+      const sdpId = document.getElementById('excecao-sdp-select').value;
+      const delSelect = document.getElementById('excecao-delegacia-select');
+      if (!delSelect) return;
+
+      const delFiltradas = appState.delegacias.filter(d => d.sdpId === sdpId);
+      delSelect.innerHTML = '<option value="">-- Selecione a Delegacia --</option>' +
+        delFiltradas.map(d => `<option value="${d.id}">${d.nome.toUpperCase()}</option>`).join('');
+
+      document.getElementById('excecao-servidor-select').innerHTML = '<option value="">-- Selecione primeiro a Delegacia --</option>';
+    }
+
+    function updateExcecaoServidoresDropdown() {
+      const delId = document.getElementById('excecao-delegacia-select').value;
+      const srvSelect = document.getElementById('excecao-servidor-select');
+      if (!srvSelect) return;
+
+      const srvs = appState.servidores.filter(s => s.delegaciaId === delId);
+      srvSelect.innerHTML = '<option value="">-- Selecione o Servidor --</option>' +
+        srvs.map(s => `<option value="${s.id}">${getServidorDisplayName(s)}</option>`).join('');
+    }
+
+    function handleSaveExcecaoServidor(e) {
+      e.preventDefault();
+      const targetDelId = document.getElementById('gestao-sobreaviso-delegacia').value;
+      const srvId = document.getElementById('excecao-servidor-select').value;
+
+      if (!targetDelId || !srvId) {
+        alert('Selecione um servidor válido.');
+        return;
+      }
+
+      if (!appState.excecoesDelegacias) appState.excecoesDelegacias = {};
+      if (!appState.excecoesDelegacias[targetDelId]) appState.excecoesDelegacias[targetDelId] = [];
+
+      if (appState.excecoesDelegacias[targetDelId].includes(srvId)) {
+        alert('Este servidor já está adicionado como exceção nesta delegacia.');
+        return;
+      }
+
+      appState.excecoesDelegacias[targetDelId].push(srvId);
+      saveState();
+      populateServidoresDelegaciaForm();
+      
+      const srv = appState.servidores.find(s => s.id === srvId);
+      addAuditLog('Inclusão de Exceção', `Servidor ${srv ? srv.nome : srvId} adicionado como exceção/reforço.`);
+      ModalManager.close('modal-add-excecao');
+      alert('Servidor de exceção/reforço adicionado com sucesso!');
+    }
+
+    function openRemoverExcecaoModal() {
+      const targetDelId = document.getElementById('gestao-sobreaviso-delegacia').value;
+      const container = document.getElementById('lista-excecoes-remover');
+      if (!container) return;
+
+      const listaIds = (appState.excecoesDelegacias && appState.excecoesDelegacias[targetDelId]) ? appState.excecoesDelegacias[targetDelId] : [];
+
+      if (listaIds.length === 0) {
+        container.innerHTML = '<p class="text-slate-400 italic text-center py-4">Nenhuma exceção cadastrada para esta unidade.</p>';
+      } else {
+        container.innerHTML = listaIds.map(id => {
+          const s = appState.servidores.find(srv => srv.id === id);
+          return `
+            <div class="flex items-center justify-between p-2 bg-white rounded border border-slate-200">
+              <span class="font-bold text-slate-800">${s ? getServidorDisplayName(s) : id}</span>
+              <button onclick="handleRemoveExcecao('${targetDelId}', '${id}')" class="bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold px-2 py-1 rounded">Excluir</button>
+            </div>
+          `;
+        }).join('');
+      }
+
+      ModalManager.open('modal-remove-excecao');
+    }
+
+    function handleRemoveExcecao(delId, srvId) {
+      const emUso = appState.sobreavisos.some(sb => sb.delegaciaId === delId && sb.servidoresIds.includes(srvId));
+      if (emUso) {
+        alert('Não é possível remover esta exceção pois o servidor está escalado em um ou mais plantões vigentes desta delegacia. Remova-o do plantão primeiro.');
+        return;
+      }
+
+      if (appState.excecoesDelegacias && appState.excecoesDelegacias[delId]) {
+        appState.excecoesDelegacias[delId] = appState.excecoesDelegacias[delId].filter(id => id !== srvId);
+        saveState();
+        populateServidoresDelegaciaForm();
+        openRemoverExcecaoModal();
+        alert('Exceção removida com sucesso!');
+      }
+    }
+
 </script>
 </body>
 </html>
