@@ -2091,7 +2091,11 @@
     }
 
     function saveState() {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
+      } catch (e) {
+        console.warn('Aviso: localStorage bloqueado (Janela Anónima). Estado mantido em memória.');
+      }
       syncStateToFirestore();
     }
 
@@ -2237,7 +2241,10 @@
       const srv = appState.servidores.find(s => s.id === selectedId);
       if (!srv) return;
 
-      const expectedPassword = srv.password || SENHA_PADRAO_PRIMEIRO_ACESSO;
+      // Definição prévia da palavra-passe padrão esperada para evitar ReferenceError
+      const expectedDefaultPass = (srv.nivelAcesso === 'ADMINISTRADOR' || srv.login === 'admin') 
+        ? SENHA_PADRAO_ADMIN 
+        : SENHA_PADRAO_PRIMEIRO_ACESSO;
 
       if (submitBtn) {
         submitBtn.disabled = true;
