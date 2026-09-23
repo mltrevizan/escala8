@@ -2109,13 +2109,13 @@
 
       setupTooltipEvents();
 
-      // Fixa o estado inicial no modo Central
+      // Garante o modo inicial correto para a Central de Flagrantes (CRF)
       appState.calendarMode = 'PLANTONISTA';
 
       // Renderização local imediata
       renderAllViews();
 
-      // Sincronização em segundo plano via Firestore
+      // Carregamento do Firestore sincronizando e redesenhando o calendário
       loadStateFromFirestore(() => {
         renderAllViews();
       });
@@ -2123,19 +2123,18 @@
 
     function renderAllViews() {
       renderCurrentProfile();
-      toggleCalendarMode(appState.calendarMode || 'PLANTONISTA');
       renderServidoresTable();
       renderSubdivisoesCards();
       renderFeriadosTable();
       renderFeriasTable();
-      renderSobreavisoTable();
       renderCentralVigentesTable();
       updateDelegaciaDropdowns();
       populateAssignServidorDropdown();
       populateLoginUserSelect();
       populateServidorFilters();
       suggestNextCentralShift();
-      populateSobreavisoDelegaciaDropdowns();
+      populateSobreavisoDelegaciaDropdowns(true);
+      toggleCalendarMode(appState.calendarMode || 'PLANTONISTA');
     }
 
     function ensureAdminUserExists() {
@@ -2576,7 +2575,7 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       renderCalendar();
     }
 
-    function populateSobreavisoDelegaciaDropdowns() {
+    function populateSobreavisoDelegaciaDropdowns(isInitialLoad = false) {
       const selectHeader = document.getElementById('filter-delegacia-mode');
       const selectGestao = document.getElementById('gestao-sobreaviso-delegacia');
 
@@ -2649,13 +2648,19 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
         selectGestao.innerHTML = gestaoOptions;
       }
 
-      onDelegaciaSelectionChange();
-    }
+      if (!isInitialLoad) {
+        onDelegaciaSelectionChange();
+      } else {
+        renderSobreavisoTable();
+        populateServidoresDelegaciaForm();
+      }
+}
 
     function onDelegaciaSelectionChange() {
       renderSobreavisoTable();
       populateServidoresDelegaciaForm();
       suggestNextSobreavisoShift();
+      // Não altera o appState.calendarMode para não forçar troca de tela
     }
 
     function suggestNextSobreavisoShift() {
