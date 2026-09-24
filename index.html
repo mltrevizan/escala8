@@ -231,9 +231,7 @@
             <i class="fa-solid fa-clock-rotate-left text-amber-400"></i> Log de Modificações
           </button>
 
-          <button onclick="exportAbaCsv('calendario')" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-3 py-1.5 rounded-lg font-semibold transition flex items-center gap-1.5 shadow-sm">
-            <i class="fa-solid fa-file-excel"></i> Exportar
-          </button>
+
         </div>
       </div>
 
@@ -1884,8 +1882,8 @@
       permissoes: JSON.parse(JSON.stringify(DEFAULT_PERMISSOES)),
       profile: 'VISUALIZADOR',
       currentUserServidorId: null,
-      currentYear: 2026,
-      currentMonth: 8,
+      currentYear: new Date().getFullYear(),
+      currentMonth: new Date().getMonth(),
       calendarMode: 'PLANTAO',
       padroesHorarios: {
         sobreavisoHoraIn: '00:00',
@@ -2297,7 +2295,15 @@
         return activeUser.sdpId === targetServidor.sdpId;
       }
       if (scope === 'DELEGACIA') {
-        return activeUser.delegaciaId === targetServidor.delegaciaId;
+        if (activeUser.delegaciaId === targetServidor.delegaciaId) return true;
+        const consorcioId = getConsorcioIdForDelegacia(activeUser.delegaciaId);
+        if (consorcioId) {
+          const unifObj = appState.plantonsUnificados ? appState.plantonsUnificados.find(p => p.id === consorcioId) : null;
+          if (unifObj && unifObj.delegaciasIds && unifObj.delegaciasIds.includes(targetServidor.delegaciaId)) {
+            return true;
+          }
+        }
+        return false;
       }
       return false;
     }
@@ -2378,11 +2384,8 @@
           const selectGestaoDel = document.getElementById('gestao-sobreaviso-delegacia');
           const selectFilterDel = document.getElementById('filter-delegacia-mode');
           
-          // Na Gestão, pré-seleciona o Consórcio se existir
           if (selectGestaoDel) selectGestaoDel.value = consorcioId;
-          
-          // No Filtro do Calendário (Botão Delegacia), seleciona a Delegacia Individual do Servidor
-          if (selectFilterDel) selectFilterDel.value = srv.delegaciaId;
+          if (selectFilterDel) selectFilterDel.value = consorcioId;
         }
 
         if (srv.sdpId) {
@@ -2485,6 +2488,11 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
 
     function renderCurrentProfile() {
       document.getElementById('current-profile-label').textContent = appState.profile;
+      
+      const btnTrocaTop = document.getElementById('btn-troca-plantao-top');
+      if (btnTrocaTop) {
+        btnTrocaTop.classList.toggle('hidden', !hasPermission('fazerTrocaPlantao'));
+      }
       const loginLabel = document.getElementById('current-user-login-label');
       const activeUser = getActiveUserServidor();
 
@@ -2909,10 +2917,16 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
         const isToday = (dateStr === todayStr);
         const inFocus = isFocusDate(dateStr);
 
+        const activeUserConsorcioId = activeUser ? getConsorcioIdForDelegacia(activeUser.delegaciaId) : null;
         const activeUserOnDuty = activeUser && (
           !isModeDelegacia 
             ? appState.escalas.some(e => e.data === dateStr && e.servidorId === activeUser.id)
-            : appState.sobreavisos.some(sb => sb.delegaciaId === selectedDelId && sb.servidoresIds.includes(activeUser.id) && (dateStr >= sb.inicio.substring(0, 10) && dateStr <= sb.fim.substring(0, 10)))
+            : appState.sobreavisos.some(sb => {
+                const isDelMatch = (sb.delegaciaId === selectedDelId) || 
+                                   (activeUserConsorcioId && sb.delegaciaId === activeUserConsorcioId) ||
+                                   (sb.delegaciaId === activeUser.delegaciaId);
+                return isDelMatch && sb.servidoresIds.includes(activeUser.id) && (dateStr >= sb.inicio.substring(0, 10) && dateStr <= sb.fim.substring(0, 10));
+              })
         );
 
         const cell = document.createElement('div');
@@ -3255,8 +3269,29 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
     }
 
     function deleteSobreavisoShift(id) {
+      const sb = appState.sobreavisos.find(item => item.id === id);
+      if (!sb) return;
+
+      const activeUser = getActiveUserServidor();
+      const scope = getScopePermission('escopoDP');
+      let canDelete = (appState.profile === 'ADMINISTRADOR' || scope === 'TODOS');
+
+      if (!canDelete && activeUser) {
+        if (sb.delegaciaId.startsWith('UNIF_')) {
+          const unifObj = appState.plantonsUnificados ? appState.plantonsUnificados.find(p => p.id === sb.delegaciaId) : null;
+          if (unifObj && unifObj.delegaciasIds && unifObj.delegaciasIds.includes(activeUser.delegaciaId)) canDelete = true;
+        } else if (sb.delegaciaId === activeUser.delegaciaId) {
+          canDelete = true;
+        }
+      }
+
+      if (!canDelete) {
+        alert('Acesso Negado: Você não possui permissão para excluir lançamentos desta delegacia/plantão unificado.');
+        return;
+      }
+
       if (confirm('Deseja excluir este lançamento de escala da Delegacia?')) {
-        appState.sobreavisos = appState.sobreavisos.filter(sb => sb.id !== id);
+        appState.sobreavisos = appState.sobreavisos.filter(item => item.id !== id);
         saveState();
         renderSobreavisoTable();
         renderCalendar();
@@ -3378,6 +3413,19 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
           const srvNames = sb.servidoresIds.map(id => { const s = appState.servidores.find(srv => srv.id === id); return s ? getServidorDisplayName(s) : id; }).join(', ');
           const [dIn, tIn] = sb.inicio.split('T'); const [yI, mI, dayI] = dIn.split('-');
           const [dOut, tOut] = sb.fim.split('T'); const [yO, mO, dayO] = dOut.split('-');
+          
+          const activeUser = getActiveUserServidor();
+          const scope = getScopePermission('escopoDP');
+          let canDelete = (appState.profile === 'ADMINISTRADOR' || scope === 'TODOS');
+          if (!canDelete && activeUser) {
+            if (sb.delegaciaId.startsWith('UNIF_')) {
+              const unifObj = appState.plantonsUnificados ? appState.plantonsUnificados.find(p => p.id === sb.delegaciaId) : null;
+              if (unifObj && unifObj.delegaciasIds && unifObj.delegaciasIds.includes(activeUser.delegaciaId)) canDelete = true;
+            } else if (sb.delegaciaId === activeUser.delegaciaId) {
+              canDelete = true;
+            }
+          }
+
           return `
             <td class="py-2.5 px-3 font-bold text-emerald-900">${sb.modalidade || 'SOBREAVISO'}</td>
             <td class="py-2.5 px-3 font-bold text-slate-800">${del ? del.nome.toUpperCase() : '-'}</td>
@@ -3385,7 +3433,9 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
             <td class="py-2.5 px-3 font-semibold">${dayO}/${mO}/${yO} ${tOut || ''}</td>
             <td class="py-2.5 px-3 font-bold text-slate-800">${srvNames}</td>
             <td class="py-2.5 px-3 font-mono text-slate-600">${sb.viatura || '-'}</td>
-            <td class="py-2.5 px-3 text-center"><button onclick="deleteSobreavisoShift('${sb.id}'); renderModalExpandTable();" class="text-red-600 hover:text-red-800 font-bold"><i class="fa-solid fa-trash"></i></button></td>
+            <td class="py-2.5 px-3 text-center">
+              ${canDelete ? `<button onclick="deleteSobreavisoShift('${sb.id}'); renderModalExpandTable();" class="text-red-600 hover:text-red-800 font-bold"><i class="fa-solid fa-trash"></i></button>` : '-'}
+            </td>
           `;
         }, 'Nenhum registro encontrado.');
       }
@@ -4042,10 +4092,15 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
     }
 
     function openManageLoginModal(servidorId) {
+      const targetSrv = appState.servidores.find(s => s.id === servidorId);
       const activeUser = getActiveUserServidor();
       const isSelf = activeUser && activeUser.id === servidorId;
+
+      if (targetSrv && targetSrv.nivelAcesso === 'ADMINISTRADOR' && appState.profile !== 'ADMINISTRADOR') {
+        alert('Acesso Negado: Apenas o Administrador do Sistema pode alterar credenciais de um Administrador.');
+        return;
+      }
       
-      // Permite que o próprio servidor altere sua senha no Primeiro Acesso ou nas suas configurações
       if (!isSelf && !canUserModifyServidor(servidorId)) {
         alert('Você não tem permissão para gerenciar credenciais de outros servidores.');
         return;
