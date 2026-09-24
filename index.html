@@ -1634,7 +1634,7 @@
         <div class="grid grid-cols-2 gap-3">
           <div>
             <label class="block font-semibold text-slate-700 mb-1">Cargo / Carreira:</label>
-            <select id="servidor-cargo" required class="w-full border border-slate-300 rounded-lg p-2 focus:ring-2 focus:ring-indigo-500">
+            <select id="servidor-cargo" onchange="onServidorCargoChange(this.value)" required class="w-full border border-slate-300 rounded-lg p-2 focus:ring-2 focus:ring-indigo-500">
               <option value="DELEGADO">DELEGADO</option>
               <option value="APJ">APJ (AGENTE DE POLÍCIA JUDICIÁRIA)</option>
             </select>
@@ -2387,6 +2387,8 @@
           if (selectGestaoDel) selectGestaoDel.value = consorcioId;
           if (selectFilterDel) selectFilterDel.value = consorcioId;
         }
+        // Garante que o login NUNCA altere o modo ativo do calendário
+        appState.calendarMode = 'PLANTONISTA';
 
         if (srv.sdpId) {
           const selectFilterSdp = document.getElementById('filter-subdivisao');
@@ -2572,9 +2574,15 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
 
       if (mode === 'DELEGACIA') {
         const selectHeader = document.getElementById('filter-delegacia-mode');
-        if (selectHeader && (!selectHeader.value || selectHeader.value === '')) {
-          const firstValidOpt = Array.from(selectHeader.options).find(opt => opt.value && opt.value !== '');
-          if (firstValidOpt) selectHeader.value = firstValidOpt.value;
+        const activeUser = getActiveUserServidor();
+        if (selectHeader) {
+          if (activeUser && activeUser.delegaciaId) {
+            const myConsorcio = getConsorcioIdForDelegacia(activeUser.delegaciaId) || activeUser.delegaciaId;
+            selectHeader.value = myConsorcio;
+          } else if (!selectHeader.value || selectHeader.value === '') {
+            const firstValidOpt = Array.from(selectHeader.options).find(opt => opt.value && opt.value !== '');
+            if (firstValidOpt) selectHeader.value = firstValidOpt.value;
+          }
         }
         btnDelegacia.classList.add('hidden');
         btnCentral.classList.remove('hidden');
@@ -2917,15 +2925,20 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
         const isToday = (dateStr === todayStr);
         const inFocus = isFocusDate(dateStr);
 
-        const activeUserConsorcioId = activeUser ? getConsorcioIdForDelegacia(activeUser.delegaciaId) : null;
         const activeUserOnDuty = activeUser && (
           !isModeDelegacia 
             ? appState.escalas.some(e => e.data === dateStr && e.servidorId === activeUser.id)
             : appState.sobreavisos.some(sb => {
-                const isDelMatch = (sb.delegaciaId === selectedDelId) || 
-                                   (activeUserConsorcioId && sb.delegaciaId === activeUserConsorcioId) ||
-                                   (sb.delegaciaId === activeUser.delegaciaId);
-                return isDelMatch && sb.servidoresIds.includes(activeUser.id) && (dateStr >= sb.inicio.substring(0, 10) && dateStr <= sb.fim.substring(0, 10));
+                let isMatch = (sb.delegaciaId === selectedDelId);
+                if (!isMatch && selectedDelId && !selectedDelId.startsWith('UNIF_')) {
+                  const cId = getConsorcioIdForDelegacia(selectedDelId);
+                  if (cId && sb.delegaciaId === cId) isMatch = true;
+                }
+                if (!isMatch && selectedDelId && selectedDelId.startsWith('UNIF_')) {
+                  const unif = appState.plantonsUnificados ? appState.plantonsUnificados.find(p => p.id === selectedDelId) : null;
+                  if (unif && unif.delegaciasIds && unif.delegaciasIds.includes(sb.delegaciaId)) isMatch = true;
+                }
+                return isMatch && sb.servidoresIds.includes(activeUser.id) && (dateStr >= sb.inicio.substring(0, 10) && dateStr <= sb.fim.substring(0, 10));
               })
         );
 
@@ -3078,7 +3091,7 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
               shiftBox.innerHTML = contentHTML;
               shiftBox.addEventListener('mouseenter', (e) => showGlobalTooltipDelegacia(e, dateStr, sb, inFocus));
               shiftBox.addEventListener('mouseleave', hideGlobalTooltip);
-              shiftBox.addEventListener('click', () => expandVigentesModal('DELEGACIA'));
+              shiftBox.addEventListener('click', () => openSobreavisoDetailsModal(dateStr, sb, inFocus));
 
               container.appendChild(shiftBox);
             });
@@ -3232,7 +3245,19 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       const selectedDelId = document.getElementById('gestao-sobreaviso-delegacia')?.value;
       const filterText = (document.getElementById('filter-sobreaviso-vigentes')?.value || '').toLowerCase();
 
-      let list = appState.sobreavisos.filter(s => s.delegaciaId === selectedDelId);
+      if (!selectedDelId) return;
+
+      let list = appState.sobreavisos.filter(s => {
+        if (s.delegaciaId === selectedDelId) return true;
+        if (selectedDelId.startsWith('UNIF_')) {
+          const unif = appState.plantonsUnificados ? appState.plantonsUnificados.find(p => p.id === selectedDelId) : null;
+          if (unif && unif.delegaciasIds && unif.delegaciasIds.includes(s.delegaciaId)) return true;
+        } else {
+          const consorcioId = getConsorcioIdForDelegacia(selectedDelId);
+          if (consorcioId && s.delegaciaId === consorcioId) return true;
+        }
+        return false;
+      });
 
       if (filterText) {
         list = list.filter(sb => {
@@ -3388,14 +3413,28 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
         }, 'Nenhum registro encontrado.');
       } else {
         thead.innerHTML = `<tr><th class="py-2.5 px-3">Modalidade</th><th class="py-2.5 px-3">Delegacia</th><th class="py-2.5 px-3">Início</th><th class="py-2.5 px-3">Fim</th><th class="py-2.5 px-3">Servidores</th><th class="py-2.5 px-3">Viatura</th><th class="py-2.5 px-3 text-center">Ação</th></tr>`;
-        let list = [...appState.sobreavisos];
+        const selectedDelId = document.getElementById('gestao-sobreaviso-delegacia')?.value;
+        const activeUser = getActiveUserServidor();
+        const scope = getScopePermission('escopoDP');
+
+        let list = appState.sobreavisos.filter(sb => {
+          if (appState.profile === 'ADMINISTRADOR' || scope === 'TODOS') return true;
+          if (selectedDelId && (sb.delegaciaId === selectedDelId)) return true;
+          if (activeUser && activeUser.delegaciaId) {
+            if (sb.delegaciaId === activeUser.delegaciaId) return true;
+            const cId = getConsorcioIdForDelegacia(activeUser.delegaciaId);
+            if (cId && sb.delegaciaId === cId) return true;
+          }
+          return false;
+        });
+
         if (searchVal) {
           list = list.filter(sb => {
             let del = appState.delegacias.find(d => d.id === sb.delegaciaId);
-          if (!del && sb.delegaciaId.startsWith('UNIF_')) {
-            const unif = appState.plantonsUnificados ? appState.plantonsUnificados.find(p => p.id === sb.delegaciaId) : null;
-            if (unif) del = { nome: unif.nome };
-          }
+            if (!del && sb.delegaciaId.startsWith('UNIF_')) {
+              const unif = appState.plantonsUnificados ? appState.plantonsUnificados.find(p => p.id === sb.delegaciaId) : null;
+              if (unif) del = { nome: unif.nome };
+            }
             const delName = del ? del.nome.toLowerCase() : '';
             const srvNames = sb.servidoresIds.map(id => { const s = appState.servidores.find(srv => srv.id === id); return s ? s.nome.toLowerCase() : ''; }).join(' ');
             return delName.includes(searchVal) || srvNames.includes(searchVal) || sb.inicio.includes(searchVal);
@@ -4337,36 +4376,13 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
           <td class="py-3 px-3 text-slate-600">${del ? del.nome.toUpperCase() : '-'}</td>
           <td class="py-3 px-3 text-slate-600 font-mono">${formatPhoneNumber(srv.telefone)}</td>
           <td class="py-3 px-3 font-semibold">
-            ${canModify ? `
-              <select onchange="updateServidorFuncaoCRF('${srv.id}', this.value)" class="text-xs bg-white border border-slate-300 rounded px-2 py-1 font-bold text-slate-700 focus:ring-2 focus:ring-indigo-500">
-                <option value="ROTATIVO" ${(srv.funcaoCRF || 'ROTATIVO') === 'ROTATIVO' ? 'selected' : ''}>ROTATIVO</option>
-                <option value="FIXO" ${srv.funcaoCRF === 'FIXO' ? 'selected' : ''}>FIXO</option>
-                <option value="COORDENADOR" ${srv.funcaoCRF === 'COORDENADOR' ? 'selected' : ''}>COORDENADOR</option>
-                <option value="NÃO ATUA" ${srv.funcaoCRF === 'NÃO ATUA' ? 'selected' : ''}>NÃO ATUA</option>
-              </select>
-            ` : `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-800">${srv.funcaoCRF || 'ROTATIVO'}</span>`}
+            <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-800">${srv.funcaoCRF || 'NÃO ATUA'}</span>
           </td>
           <td class="py-3 px-3 font-semibold">
-            ${canModify ? `
-              <select onchange="updateServidorFuncaoDP('${srv.id}', this.value)" class="text-xs bg-white border border-slate-300 rounded px-2 py-1 font-bold text-emerald-900 focus:ring-2 focus:ring-emerald-500">
-                <option value="PLANTONISTA" ${(srv.funcaoDP || 'PLANTONISTA') === 'PLANTONISTA' ? 'selected' : ''}>PLANTONISTA</option>
-                <option value="SOBREAVISO" ${srv.funcaoDP === 'SOBREAVISO' ? 'selected' : ''}>SOBREAVISO</option>
-                <option value="SUPERINTENDENTE" ${srv.funcaoDP === 'SUPERINTENDENTE' ? 'selected' : ''}>SUPERINTENDENTE</option>
-                <option value="NÃO PARTICIPA" ${srv.funcaoDP === 'NÃO PARTICIPA' ? 'selected' : ''}>NÃO PARTICIPA</option>
-              </select>
-            ` : `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">${srv.funcaoDP || 'PLANTONISTA'}</span>`}
+            <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">${srv.funcaoDP || 'NÃO PARTICIPA'}</span>
           </td>
           <td class="py-3 px-3 font-semibold">
-            ${(canModify && (appState.profile === 'ADMINISTRADOR' || appState.profile === 'COORDENADOR')) ? `
-              <select onchange="updateServidorAcesso('${srv.id}', this.value)" class="text-xs bg-white border border-slate-300 rounded px-2 py-1 font-bold text-indigo-900 focus:ring-2 focus:ring-indigo-500">
-                <option value="VISUALIZADOR" ${srv.nivelAcesso === 'VISUALIZADOR' ? 'selected' : ''}>VISUALIZADOR</option>
-                <option value="APJ" ${srv.nivelAcesso === 'APJ' ? 'selected' : ''}>APJ</option>
-                <option value="DELEGADO" ${srv.nivelAcesso === 'DELEGADO' ? 'selected' : ''}>DELEGADO</option>
-                <option value="COORDENADOR" ${srv.nivelAcesso === 'COORDENADOR' ? 'selected' : ''}>COORDENADOR</option>
-                <option value="SUPERINTENDENTE" ${srv.nivelAcesso === 'SUPERINTENDENTE' ? 'selected' : ''}>SUPERINTENDENTE</option>
-                <option value="ADMINISTRADOR" ${srv.nivelAcesso === 'ADMINISTRADOR' ? 'selected' : ''}>ADMINISTRADOR</option>
-              </select>
-            ` : `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800">${srv.nivelAcesso || 'APJ'}</span>`}
+            <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800">${srv.nivelAcesso || 'APJ'}</span>
           </td>
           <td class="py-3 px-3 text-center space-x-1.5">
             ${canModify ? `
@@ -4722,6 +4738,24 @@ function openServidorModal(servidorId = null) {
 
       // Preencher SDPs primeiro
       const sdpSelect = document.getElementById('servidor-subdivisao');
+      if (sdpSelect && appState.sdps) {
+        sdpSelect.innerHTML = appState.sdps.map(sdp => `<option value="${sdp.id}">${sdp.nome.toUpperCase()}</option>`).join('');
+      }
+
+      // Ajuste de valores padrão ao criar novo servidor
+      if (!servidorId) {
+        document.getElementById('servidor-cargo').value = 'APJ';
+        document.getElementById('servidor-nivel-acesso').value = 'APJ';
+        document.getElementById('servidor-funcao-crf').value = 'NÃO ATUA';
+        document.getElementById('servidor-funcao-dp').value = 'NÃO PARTICIPA';
+
+        if (activeUser) {
+          if (sdpSelect) sdpSelect.value = activeUser.sdpId;
+          updateDelegaciaDropdowns();
+          const delSel = document.getElementById('servidor-delegacia');
+          if (delSel) delSel.value = activeUser.delegaciaId;
+        }
+      }
       if (sdpSelect && appState.sdps) {
         sdpSelect.innerHTML = appState.sdps.map(sdp => `<option value="${sdp.id}">${sdp.nome.toUpperCase()}</option>`).join('');
       }
@@ -6505,6 +6539,78 @@ ${nomes}`);
       }
     }
 
+
+
+    function openSobreavisoDetailsModal(dateStr, sbObj, isFocusDate) {
+      hideGlobalTooltip();
+      const [year, month, day] = dateStr.split('-');
+      
+      let modal = document.getElementById('modal-sobreaviso-details');
+      if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'modal-sobreaviso-details';
+        modal.className = 'fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm hidden flex items-center justify-center p-4';
+        modal.innerHTML = `
+          <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200">
+            <div class="p-4 bg-emerald-900 text-white flex justify-between items-center">
+              <div>
+                <h3 id="sobreaviso-modal-title" class="font-bold text-base">Detalhes da Escala</h3>
+                <p id="sobreaviso-modal-subtitle" class="text-xs text-emerald-200"></p>
+              </div>
+              <button onclick="ModalManager.close('modal-sobreaviso-details')" class="text-slate-300 hover:text-white text-lg"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div id="sobreaviso-modal-body" class="p-5 space-y-4 max-h-[70vh] overflow-y-auto text-xs"></div>
+            <div class="p-3 bg-slate-50 border-t border-slate-200 text-right">
+              <button onclick="ModalManager.close('modal-sobreaviso-details')" class="px-4 py-2 bg-slate-800 text-white rounded-lg text-xs font-semibold">Fechar</button>
+            </div>
+          </div>
+        `;
+        document.body.appendChild(modal);
+      }
+
+      document.getElementById('sobreaviso-modal-title').textContent = `${sbObj.modalidade || 'SOBREAVISO'} (${day}/${month}/${year})`;
+      document.getElementById('sobreaviso-modal-subtitle').textContent = `Viatura: ${sbObj.viatura || 'Sem Viatura'}`;
+
+      const body = document.getElementById('sobreaviso-modal-body');
+      let srvList = (sbObj.servidoresIds || []).map(id => appState.servidores.find(s => s.id === id)).filter(Boolean);
+
+      let html = '<div class="space-y-3">';
+      srvList.forEach(srv => {
+        const sdp = appState.sdps.find(s => s.id === srv.sdpId);
+        const del = appState.delegacias.find(d => d.id === srv.delegaciaId);
+        const canViewPhone = hasPermission('verTelefonesSempre') || isFocusDate;
+
+        html += `
+          <div class="p-3 bg-emerald-50/60 rounded-xl border border-emerald-200 text-slate-800">
+            <div class="flex items-center justify-between mb-1">
+              <span class="font-bold text-emerald-950 text-xs">${getServidorDisplayName(srv)}</span>
+              <span class="text-[10px] px-2 py-0.5 rounded font-bold bg-emerald-200 text-emerald-900">${srv.cargo}</span>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-[11px] text-slate-600 mt-2">
+              <div><strong>SUBDIVISÃO:</strong> ${sdp ? sdp.nome.toUpperCase() : '-'}</div>
+              <div><strong>DELEGACIA:</strong> ${del ? del.nome.toUpperCase() : '-'}</div>
+              <div class="col-span-2 text-emerald-800 font-semibold"><i class="fa-solid fa-phone mr-1"></i> TELEFONE: ${canViewPhone ? formatPhoneNumber(srv.telefone) : '🔒 OCULTO EM MODO PÚBLICO'}</div>
+            </div>
+          </div>
+        `;
+      });
+      html += '</div>';
+      body.innerHTML = html;
+
+      ModalManager.open('modal-sobreaviso-details');
+    }
+  
+
+    function onServidorCargoChange(cargoVal) {
+      const accessSelect = document.getElementById('servidor-nivel-acesso');
+      if (!accessSelect) return;
+      if (cargoVal === 'DELEGADO') {
+        accessSelect.value = 'DELEGADO';
+      } else {
+        accessSelect.value = 'APJ';
+      }
+    }
+  
 </script>
 </body>
 </html>
