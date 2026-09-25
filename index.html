@@ -2011,7 +2011,7 @@
       let inQuotes = false;
       for (let i = 0; i < line.length; i++) {
         const char = line[i];
-        if (char === '"' || char === "'") {
+        if (char === '"') {
           inQuotes = !inQuotes;
         } else if (char === delim && !inQuotes) {
           result.push(current.trim().replace(/^["']|["']$/g, ''));
@@ -2233,7 +2233,8 @@
         const cleanStateToSync = JSON.parse(JSON.stringify(appState));
         cleanStateToSync.currentUserServidorId = null;
         cleanStateToSync.profile = 'VISUALIZADOR';
-        delete cleanStateToSync.credentialsMap; // Protege os hashes contra leitura pública no console
+        delete cleanStateToSync.credentialsMap;
+        delete cleanStateToSync.credentials; // Protege os hashes contra leitura pública no console
 
         db.collection('appData').doc('globalState').set(cleanStateToSync, { merge: true })
           .then(() => console.log('Dados sincronizados com o Cloud Firestore com sucesso!'))
@@ -2779,6 +2780,8 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
         sobreavisoUtilOut: '09:00',
         sobreavisoFdsIn: '09:00',
         sobreavisoFdsOut: '09:00',
+        periodicidadeHoras: 72,
+        periodicidadePlantaoHoras: 24,
         plantaoUtilIn: '17:00',
         plantaoUtilOut: '09:00',
         plantaoFdsIn: '17:00',
@@ -3637,7 +3640,7 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       }
       if (confirm(`Confirma a exclusão de TODOS os plantões da Central de Flagrantes a partir do dia ${dateVal}?`)) {
         const initialCount = appState.escalas.length;
-        appState.escalas = appState.escalas.filter(e => e.data < dateVal);
+        appState.escalas = appState.escalas.filter(e => e.data <= dateVal);
         const removed = initialCount - appState.escalas.length;
         saveState();
         renderCalendar();
@@ -3676,7 +3679,7 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
         const initialCount = appState.sobreavisos.length;
         appState.sobreavisos = appState.sobreavisos.filter(sb => {
           if (sb.delegaciaId !== delId) return true;
-          return sb.inicio.substring(0, 10) < dateVal;
+          return sb.inicio.substring(0, 10) <= dateVal;
         });
         const removed = initialCount - appState.sobreavisos.length;
         saveState();
@@ -3844,6 +3847,15 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
 
       const isExtra = document.getElementById('vincular-extrajornada-select')?.value === 'true';
       const srv = appState.servidores.find(s => s.id === apjId);
+
+      const emFerias = checkFeriasConflict(apjId, dateStr, dateStr);
+      if (emFerias) {
+        const [yI, mI, dI] = emFerias.inicio.split('-');
+        const [yF, mF, dF] = emFerias.fim.split('-');
+        if (!confirm(`ATENÇÃO: O servidor ${srv ? srv.nome : apjId} está cadastrado em FÉRIAS (${dI}/${mI}/${yI} a ${dF}/${mF}/${yF}).\n\nDeseja efetuar a vinculação mesmo assim?`)) {
+          return;
+        }
+      }
 
       appState.escalas.push({
         id: 'e_vinc_' + Date.now(),
@@ -4225,11 +4237,11 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
 
       // Trava de Autenticidade: Delegados e Superintendentes só realizam permutas em que eles próprios sejam participantes
       if ((appState.profile === 'DELEGADO' || appState.profile === 'SUPERINTENDENTE') && activeUser) {
-        const isEnvolvedInSwap = (newDelId === activeUser.id);
+        const isNewSubstitute = (newDelId === activeUser.id);
         const plantoesTurnoCheck = appState.escalas.filter(e => e.data === dateStr && e.periodo === periodo);
         const isCurrentOnDuty = plantoesTurnoCheck.some(p => p.servidorId === activeUser.id);
 
-        if (!isEnvolvedInSwap && !isCurrentOnDuty) {
+        if (!isNewSubstitute && !isCurrentOnDuty) {
           alert('Permuta negada: Você só pode registrar trocas de plantão nas quais você seja o substituído ou o substituto.');
           return;
         }
@@ -5833,7 +5845,7 @@ function findServidorByApproxName(rawName) {
 
       if (confirm(`Confirma a exclusão de TODOS os registros de férias a partir do dia ${dateStr}?`)) {
         const initialCount = appState.ferias.length;
-        appState.ferias = appState.ferias.filter(f => f.inicio < dateStr);
+        appState.ferias = appState.ferias.filter(f => f.inicio <= dateStr);
         const removedCount = initialCount - appState.ferias.length;
 
         saveState();
@@ -6118,7 +6130,18 @@ function findServidorByApproxName(rawName) {
         const og1 = document.createElement('optgroup');
         og1.label = `--- SERVIDORES ${targetMod}S ---`;
         prioritarios.forEach(s => {
-          og1.innerHTML += `<option value="${s.id}">${getServidorDisplayName(s)} (${s.funcaoDP || 'PLANTONISTA'})</option>`;
+          const refMesAno = document.getElementById('gen-del-mes-ano')?.value;
+          let feriasTag = '';
+          if (refMesAno) {
+            const [yRef, mRef] = refMesAno.split('-').map(Number);
+            const lastDayMonth = new Date(yRef, mRef, 0).getDate();
+            const startCheck = `${refMesAno}-01`;
+            const endCheck = `${refMesAno}-${String(lastDayMonth).padStart(2, '0')}`;
+            if (checkFeriasConflict(s.id, startCheck, endCheck)) {
+              feriasTag = ' ⛔ (FÉRIAS NO MÊS)';
+            }
+          }
+          og1.innerHTML += `<option value="${s.id}">${getServidorDisplayName(s)} (${s.funcaoDP || 'PLANTONISTA'})${feriasTag}</option>`;
         });
         selectElem.appendChild(og1);
       }
