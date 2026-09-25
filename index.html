@@ -25,7 +25,6 @@
       }
     }
   </script>
-
   <style>
     #global-tooltip {
       position: fixed;
@@ -101,11 +100,6 @@
       color: #9a3412 !important;
     }
   </style>
-
-  <!-- Firebase App & Auth SDKs (v10 Compat) -->
-  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
 </head>
 <body class="h-full flex flex-col font-sans text-slate-800 antialiased selection:bg-indigo-500 selection:text-white">
 
@@ -2093,6 +2087,7 @@
       if (typeof appState !== 'undefined') {
         appState.currentUserServidorId = null;
         appState.profile = 'VISUALIZADOR';
+        appState.calendarMode = 'PLANTONISTA';
         localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
       }
     });
@@ -2219,13 +2214,11 @@
     function syncStateToFirestore() {
       if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
         const db = firebase.firestore();
-        // Clona o estado sem expor o utilizador logado no documento global remoto
-        const cleanStateToSync = {
-          ...appState,
-          currentUserServidorId: null,
-          profile: 'VISUALIZADOR'
-        };
-        db.collection('appData').doc('globalState').set(cleanStateToSync)
+        const cleanStateToSync = JSON.parse(JSON.stringify(appState));
+        cleanStateToSync.currentUserServidorId = null;
+        cleanStateToSync.profile = 'VISUALIZADOR';
+
+        db.collection('appData').doc('globalState').set(cleanStateToSync, { merge: true })
           .then(() => console.log('Dados sincronizados com o Cloud Firestore com sucesso!'))
           .catch(err => console.error('Erro ao sincronizar com Firestore:', err));
       }
@@ -2239,7 +2232,11 @@
             if (doc.exists) {
               const remoteData = doc.data();
               if (remoteData && remoteData.servidores && remoteData.servidores.length > 0) {
+                const currentPadroes = { ...appState.padroesHorarios };
                 appState = { ...appState, ...remoteData };
+                if (remoteData.padroesHorarios) {
+                  appState.padroesHorarios = { ...currentPadroes, ...remoteData.padroesHorarios };
+                }
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
                 console.log('Dados do Cloud Firestore carregados com sucesso!');
               }
@@ -2263,12 +2260,13 @@
       const activeUser = getActiveUserServidor();
       const userIndentifier = activeUser ? `${activeUser.nome} (${appState.profile})` : appState.profile;
       
+      const nowISO = new Date().toISOString();
       appState.auditLogs.unshift({
         timestamp: new Date().toLocaleString('pt-BR'),
         perfil: userIndentifier,
         acao: acao.toUpperCase(),
         detalhes: detalhes.toUpperCase(),
-        rawDate: new Date().toISOString()
+        rawDate: nowISO
       });
       saveState();
     }
@@ -3106,6 +3104,10 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
     
     function handleAssignShiftModal(e) {
       if (e) e.preventDefault();
+      if (!hasPermission('gestaoCRF')) {
+        alert('Acesso Negado: Seu perfil não possui permissão para lançar plantões na Central de Flagrantes.');
+        return;
+      }
       const date = document.getElementById('assign-date-m').value;
       const periodo = document.getElementById('assign-period-m').value;
       const servidorId = document.getElementById('assign-servidor-m').value;
@@ -3124,13 +3126,27 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
         return;
       }
 
-      appState.escalas.push({
-        id: 'e_' + Date.now(),
-        data: date,
-        periodo: periodo,
-        servidorId: servidorId,
-        extrajornada: extrajornada
-      });
+      const editShiftId = document.getElementById('assign-shift-id-m')?.value;
+      if (editShiftId) {
+        const idx = appState.escalas.findIndex(e => e.id === editShiftId);
+        if (idx !== -1) {
+          appState.escalas[idx] = { id: editShiftId, data: date, periodo: periodo, servidorId: servidorId, extrajornada: extrajornada };
+          addAuditLog('Edição Plantão Central', `Atualizado plantão de ${srv ? srv.nome : servidorId} para ${date} (${periodo})`);
+        }
+        document.getElementById('assign-shift-id-m').value = '';
+        const btnSubmit = document.querySelector('#form-assign-shift-central button[type="submit"]');
+        if (btnSubmit) btnSubmit.textContent = 'Salvar Plantão na Central';
+        document.getElementById('form-assign-shift-central').reset();
+      } else {
+        appState.escalas.push({
+          id: 'e_' + Date.now(),
+          data: date,
+          periodo: periodo,
+          servidorId: servidorId,
+          extrajornada: extrajornada
+        });
+        addAuditLog('Lançamento Central', `Escalado ${srv ? srv.nome : servidorId} para ${date} (${periodo})`);
+      }
 
       saveState();
       renderCalendar();
@@ -3173,15 +3189,28 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
         }
       }
 
-      appState.sobreavisos.push({
-        id: 'sb_' + Date.now(),
-        delegaciaId,
-        modalidade,
-        inicio,
-        fim,
-        viatura,
-        servidoresIds
-      });
+      const editSbId = document.getElementById('sobreaviso-id')?.value;
+      if (editSbId) {
+        const idx = appState.sobreavisos.findIndex(s => s.id === editSbId);
+        if (idx !== -1) {
+          appState.sobreavisos[idx] = { id: editSbId, delegaciaId, modalidade, inicio, fim, viatura, servidoresIds };
+          addAuditLog('Edição Escala Delegacia', `Atualizada escala (${modalidade}) para a delegacia selecionada.`);
+        }
+        document.getElementById('sobreaviso-id').value = '';
+        const btnSubmit = document.querySelector('#form-add-sobreaviso button[type="submit"]');
+        if (btnSubmit) btnSubmit.textContent = 'Salvar Escala na Delegacia';
+      } else {
+        appState.sobreavisos.push({
+          id: 'sb_' + Date.now(),
+          delegaciaId,
+          modalidade,
+          inicio,
+          fim,
+          viatura,
+          servidoresIds
+        });
+        addAuditLog('Lançamento Delegacia', `Salva escala (${modalidade}) para a delegacia selecionada.`);
+      }
 
       saveState();
       renderSobreavisoTable();
@@ -3220,14 +3249,91 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
           <td class="py-2 px-3"><span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${e.extrajornada ? 'bg-purple-100 text-purple-800' : 'bg-slate-100 text-slate-700'}">${e.extrajornada ? 'EXTRA' : 'REGULAR'}</span></td>
           <td class="py-2 px-3 font-bold">${srv ? getServidorDisplayName(srv) : '-'}</td>
           <td class="py-2 px-3 text-slate-600">${del ? del.nome.toUpperCase() : '-'}</td>
-          <td class="py-2 px-3 text-center">
+          <td class="py-2 px-3 text-center space-x-1.5">
+            ${hasPermission('gestaoCRF') ? `<button onclick="editCentralShift('${e.id}')" class="text-indigo-600 hover:text-indigo-800 font-bold" title="Editar Plantão"><i class="fa-solid fa-pen-to-square"></i></button>` : ''}
             <button onclick="deleteCentralShift('${e.id}')" class="text-red-600 hover:text-red-800 font-bold" title="Excluir Plantão"><i class="fa-solid fa-trash"></i></button>
           </td>
         `;
       }, 'Nenhum lançamento encontrado na Central de Flagrantes.');
     }
 
+    
+    function editCentralShift(id) {
+      if (!hasPermission('gestaoCRF')) {
+        alert('Acesso Negado: Seu perfil não possui permissão para editar plantões da Central.');
+        return;
+      }
+      const item = appState.escalas.find(e => e.id === id);
+      if (!item) return;
+
+      document.getElementById('assign-shift-id-m').value = item.id;
+      document.getElementById('assign-date-m').value = item.data;
+      document.getElementById('assign-period-m').value = item.periodo;
+      document.getElementById('assign-servidor-m').value = item.servidorId;
+      document.getElementById('assign-extrajornada-m').value = item.extrajornada ? 'true' : 'false';
+
+      const btnSubmit = document.querySelector('#form-assign-shift-central button[type="submit"]');
+      if (btnSubmit) btnSubmit.textContent = 'Atualizar Plantão na Central';
+    }
+
+    function editSobreavisoShift(id) {
+      const sb = appState.sobreavisos.find(item => item.id === id);
+      if (!sb) return;
+
+      const activeUser = getActiveUserServidor();
+      const scope = getScopePermission('escopoDP');
+      let canEdit = (appState.profile === 'ADMINISTRADOR' || scope === 'TODOS');
+
+      if (!canEdit && activeUser) {
+        if (scope === 'SUBDIVISAO') {
+          const targetDel = appState.delegacias.find(d => d.id === sb.delegaciaId);
+          if (targetDel && targetDel.sdpId === activeUser.sdpId) canEdit = true;
+        } else if (sb.delegaciaId.startsWith('UNIF_')) {
+          const unifObj = appState.plantonsUnificados ? appState.plantonsUnificados.find(p => p.id === sb.delegaciaId) : null;
+          if (unifObj && unifObj.delegaciasIds && unifObj.delegaciasIds.includes(activeUser.delegaciaId)) canEdit = true;
+        } else if (sb.delegaciaId === activeUser.delegaciaId) {
+          canEdit = true;
+        }
+      }
+
+      if (!canEdit) {
+        alert('Acesso Negado: Você não possui permissão para editar lançamentos desta delegacia.');
+        return;
+      }
+
+      document.getElementById('sobreaviso-id').value = sb.id;
+      const gestaoDelSelect = document.getElementById('gestao-sobreaviso-delegacia');
+      if (gestaoDelSelect) {
+        gestaoDelSelect.value = sb.delegaciaId;
+      }
+      
+      const filterSrvInput = document.getElementById('sobreaviso-servidor-filter');
+      if (filterSrvInput) filterSrvInput.value = '';
+
+      document.getElementById('sobreaviso-modalidade').value = sb.modalidade || 'SOBREAVISO';
+      document.getElementById('sobreaviso-inicio').value = sb.inicio;
+      document.getElementById('sobreaviso-fim').value = sb.fim;
+      document.getElementById('sobreaviso-viatura').value = sb.viatura || '';
+
+      populateServidoresDelegaciaForm();
+
+      const selectSrvs = document.getElementById('sobreaviso-servidores');
+      if (selectSrvs) {
+        Array.from(selectSrvs.options).forEach(opt => {
+          opt.selected = sb.servidoresIds.includes(opt.value);
+        });
+      }
+
+      const btnSubmit = document.querySelector('#form-add-sobreaviso button[type="submit"]');
+      if (btnSubmit) btnSubmit.textContent = 'Atualizar Escala na Delegacia';
+    }
+
+    
     function deleteCentralShift(id) {
+      if (!hasPermission('gestaoCRF')) {
+        alert('Acesso Negado: Seu perfil não possui permissão para excluir plantões da Central de Flagrantes.');
+        return;
+      }
       if (confirm('Deseja remover este plantão da Central de Flagrantes?')) {
         const item = appState.escalas.find(e => e.id === id);
         appState.escalas = appState.escalas.filter(e => e.id !== id);
@@ -3286,7 +3392,8 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
           <td class="py-2 px-3 font-semibold">${dayO}/${mO}/${yO} ${tOut || ''}</td>
           <td class="py-2 px-3 font-bold text-slate-800">${srvNames}</td>
           <td class="py-2 px-3 font-mono text-slate-600">${sb.viatura || '-'}</td>
-          <td class="py-2 px-3 text-center">
+          <td class="py-2 px-3 text-center space-x-1.5">
+            <button onclick="editSobreavisoShift('${sb.id}')" class="text-emerald-600 hover:text-emerald-800 font-bold" title="Editar Lançamento"><i class="fa-solid fa-pen-to-square"></i></button>
             <button onclick="deleteSobreavisoShift('${sb.id}')" class="text-red-600 hover:text-red-800 font-bold" title="Excluir Lançamento"><i class="fa-solid fa-trash"></i></button>
           </td>
         `;
@@ -3347,7 +3454,16 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
         targetDelegaciasIds.includes(s.delegaciaId) && (s.funcaoDP || 'PLANTONISTA') !== 'NÃO PARTICIPA'
       );
 
-      targetDelegaciasIds.forEach(dId => {
+      let allCheckDelIds = [...targetDelegaciasIds];
+      if (delId.startsWith('UNIF_')) {
+        const unifObj = appState.plantonsUnificados ? appState.plantonsUnificados.find(p => p.id === delId) : null;
+        if (unifObj && unifObj.delegaciasIds) {
+          allCheckDelIds = [...new Set([...allCheckDelIds, ...unifObj.delegaciasIds])];
+        }
+      }
+      allCheckDelIds.push(delId);
+
+      allCheckDelIds.forEach(dId => {
         const excecoesIds = (appState.excecoesDelegacias && appState.excecoesDelegacias[dId]) ? appState.excecoesDelegacias[dId] : [];
         excecoesIds.forEach(exId => {
           const sEx = appState.servidores.find(s => s.id === exId);
@@ -3374,6 +3490,8 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
     function expandVigentesModal(mode) {
       currentModalExpandMode = mode;
       document.getElementById('modal-expand-title').textContent = mode === 'CENTRAL' ? 'Lançamentos Vigentes - Central de Flagrantes' : 'Lançamentos Vigentes - Delegacias';
+      const searchInput = document.getElementById('modal-expand-search');
+      if (searchInput) searchInput.value = '';
       renderModalExpandTable();
       ModalManager.open('modal-expand-vigentes');
     }
@@ -3408,7 +3526,7 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
             <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded text-[10px] font-bold ${e.extrajornada ? 'bg-purple-100 text-purple-800' : 'bg-slate-100 text-slate-700'}">${e.extrajornada ? 'EXTRA' : 'REGULAR'}</span></td>
             <td class="py-2.5 px-3 font-bold">${srv ? getServidorDisplayName(srv) : '-'}</td>
             <td class="py-2.5 px-3 text-slate-600">${del ? del.nome.toUpperCase() : '-'}</td>
-            <td class="py-2.5 px-3 text-center"><button onclick="deleteCentralShift('${e.id}'); renderModalExpandTable();" class="text-red-600 hover:text-red-800 font-bold"><i class="fa-solid fa-trash"></i></button></td>
+            <td class="py-2.5 px-3 text-center">${hasPermission('gestaoCRF') ? `<button onclick="deleteCentralShift('${e.id}'); renderModalExpandTable();" class="text-red-600 hover:text-red-800 font-bold"><i class="fa-solid fa-trash"></i></button>` : '-'}</td>
           `;
         }, 'Nenhum registro encontrado.');
       } else {
@@ -3457,7 +3575,10 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
           const scope = getScopePermission('escopoDP');
           let canDelete = (appState.profile === 'ADMINISTRADOR' || scope === 'TODOS');
           if (!canDelete && activeUser) {
-            if (sb.delegaciaId.startsWith('UNIF_')) {
+            if (scope === 'SUBDIVISAO') {
+              const targetDel = appState.delegacias.find(d => d.id === sb.delegaciaId);
+              if (targetDel && targetDel.sdpId === activeUser.sdpId) canDelete = true;
+            } else if (sb.delegaciaId.startsWith('UNIF_')) {
               const unifObj = appState.plantonsUnificados ? appState.plantonsUnificados.find(p => p.id === sb.delegaciaId) : null;
               if (unifObj && unifObj.delegaciasIds && unifObj.delegaciasIds.includes(activeUser.delegaciaId)) canDelete = true;
             } else if (sb.delegaciaId === activeUser.delegaciaId) {
@@ -3483,6 +3604,10 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
     
     
     function purgeEscalaFromDateModal() {
+      if (!hasPermission('gestaoCRF')) {
+        alert('Acesso Negado: Seu perfil não possui permissão para excluir plantões da Central.');
+        return;
+      }
       const dateVal = document.getElementById('purge-from-date-m')?.value;
       if (!dateVal) {
         alert('Selecione uma data para realizar a exclusão.');
@@ -3503,6 +3628,24 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
     function purgeEscalaDelegaciaFromDate() {
       const delId = document.getElementById('gestao-sobreaviso-delegacia')?.value;
       const dateVal = document.getElementById('purge-delegacia-from-date')?.value;
+
+      const activeUser = getActiveUserServidor();
+      const scope = getScopePermission('escopoDP');
+
+      if (appState.profile !== 'ADMINISTRADOR' && scope !== 'TODOS') {
+        if (scope === 'DELEGACIA' && activeUser && delId !== activeUser.delegaciaId) {
+          alert('Acesso Negado: Você não tem permissão para expurgar escalas desta delegacia.');
+          return;
+        }
+        if (scope === 'SUBDIVISAO' && activeUser) {
+          const targetDel = appState.delegacias.find(d => d.id === delId);
+          if (targetDel && targetDel.sdpId !== activeUser.sdpId) {
+            alert('Acesso Negado: Você não tem permissão para expurgar escalas de uma delegacia fora da sua Subdivisão.');
+            return;
+          }
+        }
+      }
+
       if (!delId || !dateVal) {
         alert('Selecione a delegacia e a data de início para exclusão.');
         return;
@@ -3525,6 +3668,23 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
     function confirmPurgeEscalaDelegacia() {
       const delId = document.getElementById('gestao-sobreaviso-delegacia')?.value;
       if (!delId) return;
+
+      const activeUser = getActiveUserServidor();
+      const scope = getScopePermission('escopoDP');
+
+      if (appState.profile !== 'ADMINISTRADOR' && scope !== 'TODOS') {
+        if (scope === 'DELEGACIA' && activeUser && delId !== activeUser.delegaciaId) {
+          alert('Acesso Negado: Você não tem permissão para apagar a escala desta delegacia.');
+          return;
+        }
+        if (scope === 'SUBDIVISAO' && activeUser) {
+          const targetDel = appState.delegacias.find(d => d.id === delId);
+          if (targetDel && targetDel.sdpId !== activeUser.sdpId) {
+            alert('Acesso Negado: Você não tem permissão para apagar a escala de uma delegacia fora da sua Subdivisão.');
+            return;
+          }
+        }
+      }
       if (confirm("ATENÇÃO: Deseja apagar TODOS os lançamentos de escala da delegacia selecionada?")) {
         const initialCount = appState.sobreavisos.length;
         appState.sobreavisos = appState.sobreavisos.filter(sb => sb.delegaciaId !== delId);
@@ -3548,6 +3708,15 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       ModalManager.open('modal-vincular-apj');
     }
 
+    
+    function updateVincularBadgeCount() {
+      const badge = document.getElementById('vincular-count-badge');
+      if (!badge) return;
+      const selects = document.querySelectorAll('.vincular-single-apj-select');
+      let pending = 0;
+      selects.forEach(s => { if (!s.value) pending++; });
+      badge.textContent = `${pending} lacunas pendentes`;
+    }
     function renderVincularApjTable() {
       const tbody = document.getElementById('vincular-apj-tbody');
       const badge = document.getElementById('vincular-count-badge');
@@ -3587,6 +3756,7 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
 
       if (lacunas.length === 0) {
         tbody.innerHTML = '<tr><td colspan="100%" class="py-6 text-center text-slate-400 italic font-medium">Nenhuma lacuna pendente encontrada para o período selecionado!</td></tr>';
+        if (badge) badge.textContent = '0 lacunas pendentes';
         return;
       }
 
@@ -3605,7 +3775,9 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
 
         let apjOptions = '<option value="">-- Selecione o APJ --</option>';
         apjsDisponiveis.forEach(apj => {
-          apjOptions += `<option value="${apj.id}">${getServidorDisplayName(apj)}</option>`;
+          const jaEscaladoData = appState.escalas.some(e => e.data === item.data && e.periodo === item.periodo && e.servidorId === apj.id);
+          const conflitoTag = jaEscaladoData ? ' ⚠️ (JÁ ESCALADO NESTE TURNO)' : '';
+          apjOptions += `<option value="${apj.id}">${getServidorDisplayName(apj)}${conflitoTag}</option>`;
         });
 
         tr.innerHTML = `
@@ -3614,7 +3786,7 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
           <td class="py-2.5 px-3 font-bold text-slate-800">${delObj ? getServidorDisplayName(delObj) : '-'}</td>
           <td class="py-2.5 px-3 text-slate-600">${delUnidadeObj ? delUnidadeObj.nome.toUpperCase() : '-'}</td>
           <td class="py-2.5 px-3">
-            <select class="vincular-single-apj-select w-full border border-slate-300 rounded-lg p-1.5 bg-white text-xs font-semibold" data-date="${item.data}" data-periodo="${item.periodo}">
+            <select class="vincular-single-apj-select w-full border border-slate-300 rounded-lg p-1.5 bg-white text-xs font-semibold" data-date="${item.data}" data-periodo="${item.periodo}" onchange="updateVincularBadgeCount()">
               ${apjOptions}
             </select>
           </td>
@@ -3629,6 +3801,10 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
     }
 
     function saveSingleVincularApj(dateStr, periodo, btnElem) {
+      if (!hasPermission('gestaoCRF')) {
+        alert('Acesso Negado: Seu perfil não possui permissão para vincular policiais na Central.');
+        return;
+      }
       const row = btnElem.closest('tr');
       const select = row.querySelector('.vincular-single-apj-select');
       const apjId = select ? select.value : null;
@@ -3658,6 +3834,10 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
     }
 
     function saveAllVincularApj() {
+      if (!hasPermission('gestaoCRF')) {
+        alert('Acesso Negado: Seu perfil não possui permissão para vincular policiais na Central.');
+        return;
+      }
       const selects = document.querySelectorAll('.vincular-single-apj-select');
       const isExtra = document.getElementById('vincular-extrajornada-select')?.value === 'true';
       let count = 0;
@@ -3908,7 +4088,10 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
         const now = new Date();
         dateInput.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
       }
-      
+      const fDel = document.getElementById('troca-del-substituto-filter');
+      const fApj = document.getElementById('troca-apj-substituto-filter');
+      if (fDel) fDel.value = '';
+      if (fApj) fApj.value = '';
       populateSubstitutosSelects();
       updateTrocaEscaladosView();
       ModalManager.open('modal-troca-plantao');
@@ -4010,8 +4193,8 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
 
       const activeUser = getActiveUserServidor();
 
-      // Trava de Autenticidade: Delegados só realizam permutas em que eles próprios sejam participantes
-      if (appState.profile === 'DELEGADO' && activeUser) {
+      // Trava de Autenticidade: Delegados e Superintendentes só realizam permutas em que eles próprios sejam participantes
+      if ((appState.profile === 'DELEGADO' || appState.profile === 'SUPERINTENDENTE') && activeUser) {
         const isEnvolvedInSwap = (newDelId === activeUser.id);
         const plantoesTurnoCheck = appState.escalas.filter(e => e.data === dateStr && e.periodo === periodo);
         const isCurrentOnDuty = plantoesTurnoCheck.some(p => p.servidorId === activeUser.id);
@@ -4177,6 +4360,21 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       const newLogin = document.getElementById('manage-login-input').value.trim().toLowerCase();
       const newPassword = document.getElementById('manage-password-input').value.trim();
 
+      const activeUser = getActiveUserServidor();
+      const isSelf = activeUser && activeUser.id === id;
+
+      // TRAVA DE SEGURANÇA: Bloqueia alterações não autorizadas por console/API
+      if (!isSelf && !canUserModifyServidor(id)) {
+        alert('Acesso Negado: Você não possui permissão para alterar credenciais deste servidor.');
+        return;
+      }
+
+      const targetSrvCheck = appState.servidores.find(s => s.id === id);
+      if (targetSrvCheck && targetSrvCheck.nivelAcesso === 'ADMINISTRADOR' && appState.profile !== 'ADMINISTRADOR') {
+        alert('Acesso Negado: Apenas o Administrador do Sistema pode alterar credenciais do Administrador.');
+        return;
+      }
+
       if (!newLogin) {
         alert('O login não pode ser em branco.');
         return;
@@ -4236,6 +4434,12 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       // TRAVA DE PERMISSÃO: Apenas Administrador e Coordenador podem acionar o reset
       if (appState.profile !== 'ADMINISTRADOR' && appState.profile !== 'COORDENADOR') {
         alert('Permissão negada: Apenas Administradores e Coordenadores podem resetar credenciais.');
+        return;
+      }
+
+      // TRAVA DE ESCOPO: Coordenador só reseta senhas dentro de seu escopo/SDP
+      if (!canUserModifyServidor(id)) {
+        alert('Acesso Negado: Você não possui permissão para resetar a senha deste servidor.');
         return;
       }
 
@@ -4308,6 +4512,9 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       document.getElementById('filter-servidor-funcao-crf').value = 'ALL';
       document.getElementById('filter-servidor-funcao-dp').value = 'ALL';
       document.getElementById('filter-servidor-acesso').value = 'ALL';
+      const masterCb = document.getElementById('select-all-servidores');
+      if (masterCb) masterCb.checked = false;
+      document.querySelectorAll('.servidor-bulk-checkbox').forEach(cb => cb.checked = false);
       renderServidoresTable();
     }
 
@@ -4436,7 +4643,7 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
             if (newFuncaoDP) srv.funcaoDP = newFuncaoDP;
             if (newAcesso) {
               if ((newAcesso === 'ADMINISTRADOR' || newAcesso === 'COORDENADOR') && appState.profile !== 'ADMINISTRADOR') {
-                // Bloqueia alteração indevida para Administrador ou Coordenador por não admins
+                alert('Acesso Negado: Apenas o Administrador pode conceder os níveis de Administrador ou Coordenador.');
               } else {
                 srv.nivelAcesso = newAcesso;
               }
@@ -4448,6 +4655,9 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       saveState();
       renderServidoresTable();
       renderSobreavisoTable();
+      populateAssignServidorDropdown();
+      populateLoginUserSelect();
+      renderCalendar();
       addAuditLog('Edição em Massa', `Atualizados ${checked.length} servidores`);
       alert(`Alterações em massa aplicadas em ${checked.length} servidores!`);
     }
@@ -4465,6 +4675,14 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
     }
 
     function openFeriasModal() {
+      if (!hasPermission('verFerias')) {
+        alert('Acesso Negado: Seu perfil não possui permissão para gerenciar férias.');
+        return;
+      }
+      const filterInput = document.getElementById('ferias-servidor-filter');
+      if (filterInput) filterInput.value = '';
+      const formFerias = document.getElementById('form-ferias');
+      if (formFerias) formFerias.reset();
       const select = document.getElementById('ferias-servidor-id');
       select.innerHTML = '<option value="">-- SELECIONE O SERVIDOR --</option>';
       appState.servidores.forEach(srv => {
@@ -4479,8 +4697,16 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       e.preventDefault();
       const servidorId = document.getElementById('ferias-servidor-id').value;
 
-      if (!canModifyTargetServidor(servidorId, 'escopoFerias')) {
-        alert('Você não tem permissão para cadastrar férias para este servidor.');
+      const activeUser = getActiveUserServidor();
+      const scope = getScopePermission('escopoFerias');
+
+      if (!servidorId || !canModifyTargetServidor(servidorId, 'escopoFerias')) {
+        alert('Acesso Negado: Você não selecionou um servidor válido ou não tem permissão para cadastrar férias para este servidor.');
+        return;
+      }
+
+      if (appState.profile !== 'ADMINISTRADOR' && scope === 'NENHUM') {
+        alert('Acesso Negado: Seu perfil não possui permissão para cadastrar férias.');
         return;
       }
       const inicio = document.getElementById('ferias-inicio').value;
@@ -4496,15 +4722,20 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
     }
 
     function deleteFerias(id) {
+      if (!hasPermission('verFerias')) {
+        alert('Acesso Negado: Seu perfil não possui permissão para gerenciar férias.');
+        return;
+      }
       const f = appState.ferias.find(fer => fer.id === id);
-      if (f && !canModifyTargetServidor(f.servidorId, 'escopoFerias')) {
-        alert('Você não tem permissão para excluir férias deste servidor.');
+      if (!f || !canModifyTargetServidor(f.servidorId, 'escopoFerias')) {
+        alert('Acesso Negado: Você não tem permissão para excluir férias deste servidor.');
         return;
       }
       if (confirm('Deseja excluir este registro de férias?')) {
         appState.ferias = appState.ferias.filter(f => f.id !== id);
         saveState();
         renderFeriasTable();
+        renderCalendar();
       }
     }
 
@@ -4756,10 +4987,6 @@ function openServidorModal(servidorId = null) {
           if (delSel) delSel.value = activeUser.delegaciaId;
         }
       }
-      if (sdpSelect && appState.sdps) {
-        sdpSelect.innerHTML = appState.sdps.map(sdp => `<option value="${sdp.id}">${sdp.nome.toUpperCase()}</option>`).join('');
-      }
-
       if (servidorId) {
         const srv = appState.servidores.find(s => s.id === servidorId);
         if (srv) {
@@ -4833,15 +5060,20 @@ function openServidorModal(servidorId = null) {
 
     function deleteDelegacia(id) {
       if (appState.profile !== 'ADMINISTRADOR' && appState.profile !== 'COORDENADOR') return;
-      if (confirm('Deseja excluir esta delegacia?')) {
+      if (confirm('Deseja excluir esta delegacia? Todos os lançamentos de escala associados serão limpos.')) {
         const del = appState.delegacias.find(d => d.id === id);
         appState.delegacias = appState.delegacias.filter(d => d.id !== id);
-        addAuditLog('Exclusão de Delegacia', `Removida delegacia ${del ? del.nome : id}`);
+        appState.sobreavisos = appState.sobreavisos.filter(sb => sb.delegaciaId !== id);
+        if (appState.excecoesDelegacias && appState.excecoesDelegacias[id]) {
+          delete appState.excecoesDelegacias[id];
+        }
+        addAuditLog('Exclusão de Delegacia', `Removida delegacia ${del ? del.nome : id} e limpas suas referências`);
         saveState();
         renderSubdivisoesCards();
         updateDelegaciaDropdowns();
         populateServidorFilters();
         populateSobreavisoDelegaciaDropdowns();
+        renderCalendar();
       }
     }
 
@@ -4937,8 +5169,9 @@ function updateDelegaciaDropdowns() {
     }
 
     function deleteServidor(id) {
-      if (!canUserModifyServidor(id)) {
-        alert('Você não tem permissão para excluir servidores fora da sua Delegacia.');
+      const scope = getScopePermission('escopoServidores');
+      if (!hasPermission('verServidores') || scope === 'NENHUM' || !canUserModifyServidor(id)) {
+        alert('Acesso Negado: Você não possui permissão para excluir este servidor.');
         return;
       }
 
@@ -5379,6 +5612,10 @@ function findServidorByApproxName(rawName) {
     }
 
     function processCsvServidoresCompare(lines) {
+      if (!hasPermission('verServidores')) {
+        alert('Acesso Negado: Seu perfil não possui permissão para importar ou gerenciar a base de servidores.');
+        return;
+      }
       if (!lines || lines.length < 2) return alert('O arquivo CSV está vazio ou não possui dados.');
 
       const delim = lines[0].includes(';') ? ';' : ',';
@@ -5502,6 +5739,10 @@ function findServidorByApproxName(rawName) {
 
     
     function processCsvFerias(lines) {
+      if (!hasPermission('verFerias')) {
+        alert('Acesso Negado: Seu perfil não possui permissão para importar registros de férias.');
+        return;
+      }
       if (!lines || lines.length < 2) return alert('O arquivo CSV está vazio ou inválido.');
       let count = 0;
       const delim = lines[0].includes(';') ? ';' : ',';
@@ -5537,6 +5778,19 @@ function findServidorByApproxName(rawName) {
     }
 
     function purgeFeriasFromDateModal() {
+      if (!hasPermission('verFerias')) {
+        alert('Acesso Negado: Seu perfil não possui permissão para gerenciar ou excluir férias.');
+        return;
+      }
+      
+      const activeUser = getActiveUserServidor();
+      const scope = getScopePermission('escopoFerias');
+
+      if (appState.profile !== 'ADMINISTRADOR' && scope === 'NENHUM') {
+        alert('Acesso Negado: Seu perfil não possui permissão para expurgar férias.');
+        return;
+      }
+
       const dateStr = document.getElementById('purge-ferias-from-date')?.value;
       if (!dateStr) return alert('Selecione uma data para realizar a exclusão.');
 
@@ -5558,6 +5812,7 @@ function findServidorByApproxName(rawName) {
         appState.ferias = [];
         saveState();
         renderFeriasTable();
+        renderCalendar();
         addAuditLog('Exclusão Total Férias', 'Limpa toda a base de férias');
         alert('Histórico de férias zerado com sucesso!');
       }
@@ -5908,13 +6163,19 @@ function findServidorByApproxName(rawName) {
       const boxEquipes = document.getElementById('gen-container-equipes');
 
       genEquipePendingSrvIds = [];
+      genPlantonistasList = [];
+      genEquipesList = [];
       renderPendingChips();
+      renderGenPlantonistasTable();
+      renderGenEquipesTable();
 
       if (mod === 'SOBREAVISO') {
         boxQtd.classList.add('hidden');
         boxPlantInd.classList.add('hidden');
         boxEquipes.classList.remove('hidden');
       } else {
+        const selectQtd = document.getElementById('gen-plantao-qtd-por-dia');
+        if (selectQtd) selectQtd.value = '1';
         boxQtd.classList.remove('hidden');
         if (qtdPorDia === 1) {
           boxPlantInd.classList.remove('hidden');
@@ -6014,6 +6275,7 @@ function findServidorByApproxName(rawName) {
       vtrInput.value = '';
       genEquipePendingSrvIds = [];
       renderPendingChips();
+      renderGenPlantonistasTable();
       renderGenEquipesTable();
     }
 
@@ -6049,10 +6311,12 @@ function findServidorByApproxName(rawName) {
 
       let recoveredCount = 0;
       historicoList.forEach(sb => {
-        const exists = genEquipesList.some(eq => 
-          eq.servidoresIds.length === sb.servidoresIds.length &&
-          eq.servidoresIds.every(id => sb.servidoresIds.includes(id))
-        );
+        const sortedSbIds = [...sb.servidoresIds].sort();
+        const exists = genEquipesList.some(eq => {
+          if (eq.servidoresIds.length !== sortedSbIds.length) return false;
+          const sortedEqIds = [...eq.servidoresIds].sort();
+          return sortedEqIds.every((id, idx) => id === sortedSbIds[idx]);
+        });
 
         if (!exists) {
           genEquipesList.push({
@@ -6120,6 +6384,16 @@ function findServidorByApproxName(rawName) {
     function handleGenerateEscalaDelegaciaSubmit(e) {
       e.preventDefault();
       const delId = document.getElementById('gen-del-id').value;
+
+      const activeUser = getActiveUserServidor();
+      const scope = getScopePermission('escopoDP');
+
+      if (appState.profile !== 'ADMINISTRADOR' && scope !== 'TODOS') {
+        if (scope === 'DELEGACIA' && activeUser && delId !== activeUser.delegaciaId) {
+          alert('Acesso Negado: Você não tem permissão para gerar escalas automáticas nesta delegacia.');
+          return;
+        }
+      }
       const mesAnoVal = document.getElementById('gen-del-mes-ano').value;
       const diaInicio = parseInt(document.getElementById('gen-del-dia-inicio').value) || 1;
       const modalidade = document.getElementById('gen-del-modalidade').value;
@@ -6138,7 +6412,7 @@ function findServidorByApproxName(rawName) {
       }
 
       if (useEquipesMode && genEquipesList.length === 0) {
-        alert('Crie pelo menos uma equipe para o rodízio.');
+        alert('Crie ou adicione pelo menos uma equipe para formar o rodízio do gerador.');
         return;
       }
 
@@ -6193,11 +6467,13 @@ function findServidorByApproxName(rawName) {
 
             let hasVacationConflict = false;
             for (const sId of candidateEquipe.servidoresIds) {
-              if (skippedSrvIdsByChoice.includes(sId)) {
-                hasVacationConflict = true;
-                break;
-              }
               const feriasConf = checkFeriasConflict(sId, startISO.substring(0, 10), endISO.substring(0, 10));
+              if (feriasConf) {
+                if (skippedSrvIdsByChoice.includes(`${sId}_${feriasConf.inicio}_${feriasConf.fim}`)) {
+                  hasVacationConflict = true;
+                  break;
+                }
+              }
               if (feriasConf) {
                 const srv = appState.servidores.find(s => s.id === sId);
                 const sName = srv ? getServidorDisplayName(srv) : sId;
@@ -6206,7 +6482,7 @@ function findServidorByApproxName(rawName) {
                 
                 const skipChoice = confirm(`ATENÇÃO [FÉRIAS DETECTADAS]:\n\nO policial ${sName} está em FÉRIAS no período (${dI}/${mI}/${yI} a ${dF}/${mF}/${yF}).\n\nDeseja PULAR/REMOVER este policial desta escala durante o período de férias?\n\n• Clique OK para PULAR este policial e passar para a próxima equipe.\n• Clique CANCELAR para MANTER a equipe escalada mesmo durante as férias.`);
                 if (skipChoice) {
-                  skippedSrvIdsByChoice.push(sId);
+                  skippedSrvIdsByChoice.push(`${sId}_${feriasConf.inicio}_${feriasConf.fim}`);
                   hasVacationConflict = true;
                   break;
                 }
@@ -6443,6 +6719,7 @@ ${nomes}`);
           appState.sdps.map(s => `<option value="${s.id}">${s.nome.toUpperCase()}</option>`).join('');
       }
 
+      if (sdpSelect) sdpSelect.value = '';
       document.getElementById('excecao-delegacia-select').innerHTML = '<option value="">-- Selecione primeiro a SDP --</option>';
       document.getElementById('excecao-servidor-select').innerHTML = '<option value="">-- Selecione primeiro a Delegacia --</option>';
 
@@ -6475,6 +6752,21 @@ ${nomes}`);
       e.preventDefault();
       const targetDelId = document.getElementById('gestao-sobreaviso-delegacia').value;
       const srvId = document.getElementById('excecao-servidor-select').value;
+
+      const activeUser = getActiveUserServidor();
+      const scope = getScopePermission('escopoDP');
+
+      // TRAVA DE SEGURANÇA: Valida o escopo do usuário conectado (Delegacia de Destino e Servidor de Origem)
+      if (appState.profile !== 'ADMINISTRADOR' && scope !== 'TODOS') {
+        if (scope === 'DELEGACIA' && activeUser && targetDelId !== activeUser.delegaciaId) {
+          alert('Acesso Negado: Você não possui permissão para incluir exceções nesta delegacia.');
+          return;
+        }
+        if (!canModifyTargetServidor(srvId, 'escopoDP')) {
+          alert('Acesso Negado: Você não possui permissão sobre o servidor selecionado para exceção.');
+          return;
+        }
+      }
 
       if (!targetDelId || !srvId) {
         alert('Selecione um servidor válido.');
@@ -6599,18 +6891,6 @@ ${nomes}`);
 
       ModalManager.open('modal-sobreaviso-details');
     }
-  
-
-    function onServidorCargoChange(cargoVal) {
-      const accessSelect = document.getElementById('servidor-nivel-acesso');
-      if (!accessSelect) return;
-      if (cargoVal === 'DELEGADO') {
-        accessSelect.value = 'DELEGADO';
-      } else {
-        accessSelect.value = 'APJ';
-      }
-    }
-  
-</script>
+  </script>
 </body>
 </html>
