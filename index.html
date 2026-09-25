@@ -1873,6 +1873,7 @@
     };
 
     let appState = {
+      credentialsMap: {}, // Armazena hashes de senhas cadastradas para persistência global
       permissoes: JSON.parse(JSON.stringify(DEFAULT_PERMISSOES)),
       profile: 'VISUALIZADOR',
       currentUserServidorId: null,
@@ -2083,14 +2084,18 @@
 
 
     // LOGOFF AUTOMÁTICO AO FECHAR A ABA OU NAVEGADOR
-    window.addEventListener('beforeunload', () => {
+    // LOGOFF GARANTIDO PARA DISPOSITIVOS MÓVEIS (SAFARI/IOS/ANDROID)
+    const performAutoLogoff = () => {
       if (typeof appState !== 'undefined') {
         appState.currentUserServidorId = null;
         appState.profile = 'VISUALIZADOR';
         appState.calendarMode = 'PLANTONISTA';
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(appState)); } catch(e){}
       }
-    });
+    };
+
+    window.addEventListener('pagehide', performAutoLogoff);
+    window.addEventListener('beforeunload', performAutoLogoff);
     
     window.addEventListener('DOMContentLoaded', () => {
       loadState();
@@ -2160,6 +2165,17 @@
     }
 
     function loadState() {
+      // MIGRAÇÃO AUTOMÁTICA: Impede que senhas/dados sejam zerados ao atualizar a versão no navegador
+      if (!localStorage.getItem(STORAGE_KEY)) {
+        const legacyKeys = ['ESCALA_FLAGRANTES_V9', 'ESCALA_FLAGRANTES_V8', 'ESCALA_FLAGRANTES_V7', 'ESCALA_FLAGRANTES_V1'];
+        for (const k of legacyKeys) {
+          const legacyData = localStorage.getItem(k);
+          if (legacyData) {
+            localStorage.setItem(STORAGE_KEY, legacyData);
+            break;
+          }
+        }
+      }
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         try {
@@ -2217,6 +2233,7 @@
         const cleanStateToSync = JSON.parse(JSON.stringify(appState));
         cleanStateToSync.currentUserServidorId = null;
         cleanStateToSync.profile = 'VISUALIZADOR';
+        delete cleanStateToSync.credentialsMap; // Protege os hashes contra leitura pública no console
 
         db.collection('appData').doc('globalState').set(cleanStateToSync, { merge: true })
           .then(() => console.log('Dados sincronizados com o Cloud Firestore com sucesso!'))
@@ -2419,7 +2436,7 @@
 
         // VERIFICAÇÃO EXCLUSIVA DE PRIMEIRO ACESSO COM SENHA PADRÃO
         const isUsingDefaultPass = (password === SENHA_PADRAO_PRIMEIRO_ACESSO || password === SENHA_PADRAO_ADMIN);
-        if (!remoteHash && isUsingDefaultPass) {
+        if (!activeHash && isUsingDefaultPass) {
           alert(`Bem-vindo(a), ${srv.nome}!
 
 Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, cadastre uma nova senha pessoal.`);
@@ -2444,8 +2461,8 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       }
 
       const inputHash = await hashPassword(password);
-      // A validação usa exclusivamente o documento remoto 'credenciais'
-      const activeHash = remoteHash;
+      // Valida credenciais no mapa sincronizado ou no Firestore remoto
+      const activeHash = (appState.credentialsMap && appState.credentialsMap[srv.id]) || remoteHash;
 
       // REGRA ESTRITA DE SEGURANÇA:
       // 1. Se existir senha individualizada na nuvem (activeHash), aceita SOMENTE ela.
@@ -2577,7 +2594,8 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
           if (activeUser && activeUser.delegaciaId) {
             const myConsorcio = getConsorcioIdForDelegacia(activeUser.delegaciaId) || activeUser.delegaciaId;
             selectHeader.value = myConsorcio;
-          } else if (!selectHeader.value || selectHeader.value === '') {
+          }
+          if (!selectHeader.value || selectHeader.value === '') {
             const firstValidOpt = Array.from(selectHeader.options).find(opt => opt.value && opt.value !== '');
             if (firstValidOpt) selectHeader.value = firstValidOpt.value;
           }
@@ -2717,6 +2735,9 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       }
 
       if (!isInitialLoad) {
+        if (selectGestao && selectHeader && selectGestao.value) {
+          selectHeader.value = selectGestao.value;
+        }
         onDelegaciaSelectionChange();
       } else {
         renderSobreavisoTable();
@@ -2788,7 +2809,9 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       const inVal = document.getElementById('sobreaviso-inicio').value;
       if (!inVal) return;
 
-      const startDateObj = new Date(inVal);
+      // Formatação compatível com Safari
+      const formattedInVal = inVal.includes('T') ? inVal.replace('T', ' ') : inVal;
+      const startDateObj = new Date(formattedInVal.replace(/-/g, '/'));
       if (isNaN(startDateObj.getTime())) return;
 
       const delSelect = document.getElementById('gestao-sobreaviso-delegacia');
@@ -3152,7 +3175,6 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       renderCalendar();
       renderCentralVigentesTable();
       suggestNextCentralShift();
-      addAuditLog('Lançamento Central', `Escalado ${srv ? srv.nome : servidorId} para ${date} (${periodo})`);
       alert('Plantão salvo com sucesso na Central!');
     }
 
@@ -3761,7 +3783,7 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       }
 
       // Lista de APJs disponíveis para o dropdown
-      const apjsDisponiveis = appState.servidores.filter(s => s.cargo === 'APJ');
+      const apjsDisponiveis = appState.servidores.filter(s => s.cargo === 'APJ' && (s.funcaoCRF || 'ROTATIVO') !== 'NÃO ATUA');
 
       lacunas.sort((a, b) => a.data.localeCompare(b.data));
 
@@ -3776,7 +3798,13 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
         let apjOptions = '<option value="">-- Selecione o APJ --</option>';
         apjsDisponiveis.forEach(apj => {
           const jaEscaladoData = appState.escalas.some(e => e.data === item.data && e.periodo === item.periodo && e.servidorId === apj.id);
-          const conflitoTag = jaEscaladoData ? ' ⚠️ (JÁ ESCALADO NESTE TURNO)' : '';
+          const emFerias = checkFeriasConflict(apj.id, item.data, item.data);
+          let conflitoTag = '';
+          if (emFerias) {
+            conflitoTag = ' ⛔ (EM FÉRIAS)';
+          } else if (jaEscaladoData) {
+            conflitoTag = ' ⚠️ (JÁ ESCALADO NESTE TURNO)';
+          }
           apjOptions += `<option value="${apj.id}">${getServidorDisplayName(apj)}${conflitoTag}</option>`;
         });
 
@@ -4171,14 +4199,16 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       if (activeUser && activeUser.cargo === 'DELEGADO') {
         if (!delEscalado || delEscalado.id !== activeUser.id) {
           delSubSelect.value = activeUser.id;
-          hintSugestao.classList.remove('hidden');
+          if (hintSugestao) hintSugestao.classList.remove('hidden');
         } else {
           delSubSelect.value = '';
-          hintSugestao.classList.add('hidden');
+          const filterInput = document.getElementById('troca-del-substituto-filter');
+          if (filterInput) filterInput.value = '';
+          if (hintSugestao) hintSugestao.classList.add('hidden');
         }
       } else {
         delSubSelect.value = '';
-        hintSugestao.classList.add('hidden');
+        if (hintSugestao) hintSugestao.classList.add('hidden');
       }
 
       document.getElementById('troca-apj-substituto').value = 'NAO_MODIFICADO';
@@ -4393,6 +4423,9 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
         if (newPassword) {
           const passHash = await hashPassword(newPassword);
           srv.password = null; // GARANTE QUE A PALAVRA-PASSE NUNCA VAZA PARA O GLOBALSTATE
+
+          if (!appState.credentialsMap) appState.credentialsMap = {};
+          appState.credentialsMap[id] = passHash;
 
           if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
             try {
@@ -4635,22 +4668,23 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
         return;
       }
 
-      checked.forEach(cb => {
+      if (newAcesso && appState.profile !== 'ADMINISTRADOR') {
+        alert('Acesso Negado: Apenas o Administrador do Sistema pode alterar níveis de acesso em massa.');
+        return;
+      }
+
+      for (const cb of checked) {
         if (canUserModifyServidor(cb.value)) {
           const srv = appState.servidores.find(s => s.id === cb.value);
           if (srv) {
             if (newFuncaoCRF) srv.funcaoCRF = newFuncaoCRF;
             if (newFuncaoDP) srv.funcaoDP = newFuncaoDP;
-            if (newAcesso) {
-              if ((newAcesso === 'ADMINISTRADOR' || newAcesso === 'COORDENADOR') && appState.profile !== 'ADMINISTRADOR') {
-                alert('Acesso Negado: Apenas o Administrador pode conceder os níveis de Administrador ou Coordenador.');
-              } else {
-                srv.nivelAcesso = newAcesso;
-              }
+            if (newAcesso && appState.profile === 'ADMINISTRADOR') {
+              srv.nivelAcesso = newAcesso;
             }
           }
         }
-      });
+      }
 
       saveState();
       renderServidoresTable();
@@ -5111,10 +5145,10 @@ function updateDelegaciaDropdowns() {
       const nome = document.getElementById('servidor-nome').value.trim().toUpperCase();
       let nivelAcesso = document.getElementById('servidor-nivel-acesso').value;
 
-      // TRAVA DE SEGURANÇA: Impede que Delegados concedam acesso DELEGADO, COORDENADOR ou ADMINISTRADOR
+      // TRAVA DE SEGURANÇA: Impede que Delegados concedam acesso DELEGADO, SUPERINTENDENTE, COORDENADOR ou ADMINISTRADOR
       if (appState.profile !== 'ADMINISTRADOR' && appState.profile !== 'COORDENADOR') {
-        if (['DELEGADO', 'COORDENADOR', 'ADMINISTRADOR'].includes(nivelAcesso)) {
-          alert('Permissão negada: Você não possui autorização para conceder o perfil de Delegado, Coordenador ou Administrador.');
+        if (['DELEGADO', 'SUPERINTENDENTE', 'COORDENADOR', 'ADMINISTRADOR'].includes(nivelAcesso)) {
+          alert('Permissão negada: Você não possui autorização para conceder este perfil de acesso.');
           return;
         }
       }
@@ -5142,15 +5176,15 @@ function updateDelegaciaDropdowns() {
       const funcaoCRF = document.getElementById('servidor-funcao-crf').value || 'ROTATIVO';
       const funcaoDP = document.getElementById('servidor-funcao-dp').value || 'PLANTONISTA';
 
-      const generatedLogin = generateServidorLogin(nome, cargo, id);
-
       if (id) {
         const idx = appState.servidores.findIndex(s => s.id === id);
         if (idx !== -1) {
-          appState.servidores[idx] = { ...appState.servidores[idx], cargo, nome, login: generatedLogin, sdpId, delegaciaId, telefone, funcaoCRF, funcaoDP, nivelAcesso, password: null };
+          const currentLogin = appState.servidores[idx].login || generateServidorLogin(nome, cargo, id);
+          appState.servidores[idx] = { ...appState.servidores[idx], cargo, nome, login: currentLogin, sdpId, delegaciaId, telefone, funcaoCRF, funcaoDP, nivelAcesso, password: null };
           addAuditLog('Edição de Servidor', `Alterados dados de ${nome}`);
         }
       } else {
+        const generatedLogin = generateServidorLogin(nome, cargo, null);
         appState.servidores.push({ id: 's_' + Date.now(), cargo, nome, login: generatedLogin, sdpId, delegaciaId, telefone, funcaoCRF, funcaoDP, nivelAcesso, password: null });
         addAuditLog('Novo Servidor', `Cadastrado ${cargo} ${nome} (Login: ${generatedLogin})`);
       }
@@ -5512,7 +5546,7 @@ function processCsvEscalasApprox(lines) {
           if (!groupedMap.has(groupKey)) groupedMap.set(groupKey, { delegaciaId: rowDelId, mod, inicio, fim, vtr, names: [] });
 
           const entry = groupedMap.get(groupKey);
-          rawSrvString.split(/[\||,;]/).map(n => n.trim()).filter(Boolean).forEach(n => {
+          rawSrvString.split(/[\||;]/).map(n => n.trim()).filter(Boolean).forEach(n => {
             if (!entry.names.includes(n)) entry.names.push(n);
           });
         }
@@ -5679,6 +5713,9 @@ function findServidorByApproxName(rawName) {
         }
 
         const existingIdx = appState.servidores.findIndex(s => s.nome.toUpperCase() === nome);
+        if (existingIdx !== -1 && !canUserModifyServidor(appState.servidores[existingIdx].id)) {
+          continue; // Pula a atualização de servidores fora do escopo do usuário conectado
+        }
         const generatedLogin = generateServidorLogin(nome, cargo, existingIdx !== -1 ? appState.servidores[existingIdx].id : null);
 
         if (existingIdx !== -1) {
@@ -5967,7 +6004,10 @@ function findServidorByApproxName(rawName) {
         container.appendChild(pageDiv);
 
         curM++;
-        if (curM > 11) { curM = 0; curY++; }
+        if (curM > 11) { 
+          curM = 0; 
+          curY++; 
+        }
       }
 
       ModalManager.close('modal-print');
@@ -6054,7 +6094,7 @@ function findServidorByApproxName(rawName) {
       }
 
       let servidoresUnidade = appState.servidores.filter(s => 
-        targetDelegaciasIds.includes(s.delegaciaId) && (s.funcaoDP || 'PLANTONISTA') !== 'NÃO PARTICIPA'
+        targetDelegaciasIds.includes(s.delegaciaId) && (s.funcaoDP || 'PLANTONISTA') !== 'NÃO PARTICIPA' && (s.funcaoCRF || 'ROTATIVO') !== 'NÃO ATUA'
       );
 
       if (textFilter) {
@@ -6522,7 +6562,8 @@ function findServidorByApproxName(rawName) {
 
               let hasVacationConflict = false;
               for (const sId of candidateEquipe.servidoresIds) {
-                if (skippedSrvIdsByChoice.includes(sId)) {
+                const feriasConfCheck = checkFeriasConflict(sId, startISO.substring(0, 10), endISO.substring(0, 10));
+                if (feriasConfCheck && skippedSrvIdsByChoice.includes(`${sId}_${feriasConfCheck.inicio}_${feriasConfCheck.fim}`)) {
                   hasVacationConflict = true;
                   break;
                 }
@@ -6555,9 +6596,10 @@ function findServidorByApproxName(rawName) {
               seqIndex++;
               attempts++;
 
-              let isSkipped = skippedSrvIdsByChoice.includes(candidateId);
+              const feriasConfCheckInd = checkFeriasConflict(candidateId, startISO.substring(0, 10), endISO.substring(0, 10));
+              let isSkipped = feriasConfCheckInd && skippedSrvIdsByChoice.includes(`${candidateId}_${feriasConfCheckInd.inicio}_${feriasConfCheckInd.fim}`);
               if (!isSkipped) {
-                const feriasConf = checkFeriasConflict(candidateId, startISO.substring(0, 10), endISO.substring(0, 10));
+                const feriasConf = feriasConfCheckInd;
                 if (feriasConf) {
                   const srv = appState.servidores.find(s => s.id === candidateId);
                   const sName = srv ? getServidorDisplayName(srv) : candidateId;
@@ -6566,7 +6608,7 @@ function findServidorByApproxName(rawName) {
 
                   const skipChoice = confirm(`ATENÇÃO [FÉRIAS DETECTADAS]:\n\nO policial ${sName} está em FÉRIAS no período (${dI}/${mI}/${yI} a ${dF}/${mF}/${yF}).\n\nDeseja PULAR/REMOVER este policial desta escala durante o período de férias?\n\n• Clique OK para PULAR este policial e passar para o próximo da fila.\n• Clique CANCELAR para MANTER o policial escalado mesmo durante as férias.`);
                   if (skipChoice) {
-                    skippedSrvIdsByChoice.push(candidateId);
+                    skippedSrvIdsByChoice.push(`${candidateId}_${feriasConf.inicio}_${feriasConf.fim}`);
                     isSkipped = true;
                   }
                 }
@@ -6891,6 +6933,56 @@ ${nomes}`);
 
       ModalManager.open('modal-sobreaviso-details');
     }
+  
+    function openAuditLogModal() {
+      if (!hasPermission('verLogs')) {
+        alert('Acesso Negado: Seu perfil não possui permissão para visualizar o log de modificações.');
+        return;
+      }
+      const startInput = document.getElementById('audit-filter-start');
+      const endInput = document.getElementById('audit-filter-end');
+      if (startInput) startInput.value = '';
+      if (endInput) endInput.value = '';
+
+      renderAuditLogsTable();
+      ModalManager.open('modal-audit-log');
+    }
+
+    function renderAuditLogsTable() {
+      const tbody = document.getElementById('audit-log-tbody');
+      if (!tbody) return;
+
+      const startDate = document.getElementById('audit-filter-start')?.value;
+      const endDate = document.getElementById('audit-filter-end')?.value;
+
+      let logs = appState.auditLogs || [];
+
+      if (startDate) {
+        logs = logs.filter(l => l.rawDate && l.rawDate.substring(0, 10) >= startDate);
+      }
+      if (endDate) {
+        logs = logs.filter(l => l.rawDate && l.rawDate.substring(0, 10) <= endDate);
+      }
+
+      if (logs.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="100%" class="py-4 text-center text-slate-400 italic">Nenhum registro de modificação encontrado.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = logs.map(log => `
+        <tr class="hover:bg-slate-50 transition">
+          <td class="py-2 px-3 font-semibold text-slate-700 whitespace-nowrap">${log.timestamp || '-'}</td>
+          <td class="py-2 px-3 font-bold text-slate-800 whitespace-nowrap">${log.perfil || '-'}</td>
+          <td class="py-2 px-3 font-bold text-indigo-900 whitespace-nowrap">${log.acao || '-'}</td>
+          <td class="py-2 px-3 text-slate-600">${log.detalhes || '-'}</td>
+        </tr>
+      `).join('');
+    }
+
+    function printAuditLogs() {
+      window.print();
+    }
+
   </script>
 </body>
 </html>
