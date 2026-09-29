@@ -1333,6 +1333,11 @@
           <input type="password" id="manage-password-input" placeholder="Digite uma nova senha para este servidor..." class="w-full border border-slate-300 rounded-lg p-2 font-mono text-xs focus:ring-2 focus:ring-indigo-500">
         </div>
 
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">Confirmar Nova Senha:</label>
+          <input type="password" id="manage-password-confirm-input" placeholder="Repita a nova senha para confirmar..." class="w-full border border-slate-300 rounded-lg p-2 font-mono text-xs focus:ring-2 focus:ring-indigo-500">
+        </div>
+
         <div class="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-[11px]">
           <i class="fa-solid fa-circle-info mr-1"></i> Se deixar o campo de senha em branco, a senha padrão de primeiro acesso do servidor será mantida.
         </div>
@@ -2062,8 +2067,20 @@
       };
 
       let candidate = buildStandard(false);
-      const conflict = appState.servidores.find(s => s.login === candidate && s.id !== currentId);
-      if (conflict && cleanParts.length >= 3) candidate = buildStandard(true);
+      let conflict = appState.servidores.find(s => s.login === candidate && s.id !== currentId);
+      
+      if (conflict && cleanParts.length >= 3) {
+        candidate = buildStandard(true);
+        conflict = appState.servidores.find(s => s.login === candidate && s.id !== currentId);
+      }
+
+      // Se ainda houver conflito, adiciona um sufixo numérico incremental para garantir unicidade
+      let counter = 2;
+      let baseCandidate = candidate;
+      while (appState.servidores.some(s => s.login === candidate && s.id !== currentId)) {
+        candidate = `${baseCandidate}${counter}`;
+        counter++;
+      }
 
       return candidate;
     }
@@ -2229,6 +2246,13 @@
 
             if (colName === 'servidores') {
               ensureAdminUserExists();
+              // Atualiza dinamicamente o perfil e permissões do usuário logado se o acesso for alterado
+              if (appState.currentUserServidorId) {
+                const currentSrv = items.find(s => s.id === appState.currentUserServidorId);
+                if (currentSrv) {
+                  appState.profile = currentSrv.nivelAcesso || (currentSrv.cargo === 'DELEGADO' ? 'DELEGADO' : 'APJ');
+                }
+              }
             }
 
             renderAllViews();
@@ -2430,27 +2454,27 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
         }
       };
 
-      // OPÇÃO B: BUSCA A SENHA NO DOCUMENTO INDIVIDUALIZADO DO FIRESTORE
-      let remoteHash = null;
-      if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
+      // BUSCA DIRETA DA CREDENCIAL NA NUVEM
+      let activeHash = (appState.credentialsMap && appState.credentialsMap[srv.id]) || null;
+      if (!activeHash && typeof firebase !== 'undefined' && firebase.apps.length > 0) {
         try {
           const db = firebase.firestore();
           const credDoc = await db.collection('credenciais').doc(srv.id).get();
-          if (credDoc.exists) {
-            remoteHash = credDoc.data().hash;
+          if (credDoc.exists && credDoc.data().hash) {
+            activeHash = credDoc.data().hash;
+            if (!appState.credentialsMap) appState.credentialsMap = {};
+            appState.credentialsMap[srv.id] = activeHash;
           }
         } catch (e) {
-          console.log('Consulta a credenciais individuais:', e);
+          console.log('Consulta a credenciais no Firestore:', e);
         }
       }
 
       const inputHash = await hashPassword(password);
-      // Valida credenciais no mapa sincronizado ou no Firestore remoto
-      const activeHash = (appState.credentialsMap && appState.credentialsMap[srv.id]) || remoteHash;
 
-      // REGRA ESTRITA DE SEGURANÇA:
-      // 1. Se existir senha individualizada na nuvem (activeHash), aceita SOMENTE ela.
-      // 2. Se NÃO existir senha gravada (!activeHash), aceita a senha padrão (Central123) para Primeiro Acesso.
+      // REGRA DE AUTENTICAÇÃO:
+      // Se existir hash na nuvem (activeHash), aceita APENAS ele.
+      // Caso contrário, valida contra a senha padrão de primeiro acesso.
       const isValidPassword = activeHash 
         ? (inputHash === activeHash) 
         : (password === expectedDefaultPass);
@@ -4368,6 +4392,9 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       document.getElementById('manage-login-servidor-nome').textContent = `${srv.cargo} ${srv.nome}`;
       document.getElementById('manage-login-input').value = srv.login;
       document.getElementById('manage-password-input').value = '';
+      if (document.getElementById('manage-password-confirm-input')) {
+        document.getElementById('manage-password-confirm-input').value = '';
+      }
 
       ModalManager.open('modal-manage-login');
     }
@@ -4392,11 +4419,16 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       const id = document.getElementById('manage-login-servidor-id').value;
       const newLogin = document.getElementById('manage-login-input').value.trim().toLowerCase();
       const newPassword = document.getElementById('manage-password-input').value.trim();
+      const confirmPassword = document.getElementById('manage-password-confirm-input')?.value.trim() || '';
+
+      if (newPassword && newPassword !== confirmPassword) {
+        alert('As senhas digitadas não coincidem! Por favor, confirme a nova senha corretamente.');
+        return;
+      }
 
       const activeUser = getActiveUserServidor();
       const isSelf = activeUser && activeUser.id === id;
 
-      // TRAVA DE SEGURANÇA: Bloqueia alterações não autorizadas por console/API
       if (!isSelf && !canUserModifyServidor(id)) {
         alert('Acesso Negado: Você não possui permissão para alterar credenciais deste servidor.');
         return;
@@ -4422,40 +4454,15 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       const srv = appState.servidores.find(s => s.id === id);
       if (srv) {
         srv.login = newLogin;
-        
+
+        // 1. Salva a nova credencial primeiro (se informada)
         if (newPassword) {
           const passHash = await hashPassword(newPassword);
-          srv.password = null; // GARANTE QUE A PALAVRA-PASSE NUNCA VAZA PARA O GLOBALSTATE
+          srv.password = null;
 
           if (!appState.credentialsMap) appState.credentialsMap = {};
           appState.credentialsMap[id] = passHash;
 
-          if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
-            try {
-              const db = firebase.firestore();
-              await db.collection('credenciais').doc(id).set({
-                servidorId: id,
-                login: newLogin,
-                hash: passHash,
-                updatedAt: new Date().toISOString()
-              });
-              console.log(`Senha individualizada salva no Firestore para ${srv.nome}`);
-
-              if (firebase.auth && firebase.auth().currentUser) {
-                firebase.auth().currentUser.updatePassword(newPassword).catch(err => {
-                  console.log('Atualização de Auth:', err.message);
-                });
-              }
-            } catch (err) {
-              console.error('Erro ao salvar credencial individualizada:', err);
-              alert('Aviso: Não foi possível sincronizar a nova senha na nuvem devido a uma falha de conexão. Verifique sua rede.');
-            }
-          }
-        }
-
-        await syncDocToFirestore('servidores', id, srv);
-        if (newPassword) {
-          const passHash = await hashPassword(newPassword);
           await syncDocToFirestore('credenciais', id, {
             servidorId: id,
             login: newLogin,
@@ -4463,9 +4470,13 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
             updatedAt: new Date().toISOString()
           });
         }
+
+        // 2. Atualiza a coleção de servidores por último
+        await syncDocToFirestore('servidores', id, srv);
+
         renderServidoresTable();
         populateLoginUserSelect();
-        addAuditLog('Alteração de Credenciais', `Login/Senha de ${srv.nome} atualizados individualmente`);
+        addAuditLog('Alteração de Credenciais', `Login/Senha de ${srv.nome} atualizados com sucesso`);
         ModalManager.close('modal-manage-login');
         alert(`Credenciais do servidor ${srv.nome} atualizadas e salvas com sucesso no Firestore!`);
       }
@@ -4505,16 +4516,10 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
 
       const targetDefaultPass = (srv.nivelAcesso === 'ADMINISTRADOR' || srv.login === 'admin') ? SENHA_PADRAO_ADMIN : SENHA_PADRAO_PRIMEIRO_ACESSO;
       if (confirm(`Confirma o reset da senha do servidor ${srv.nome} para a senha padrão de primeiro acesso?`)) {
-        srv.password = null; // Reverte no estado local
+        srv.password = null;
 
-        if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
-          try {
-            const db = firebase.firestore();
-            await db.collection('credenciais').doc(id).delete();
-            console.log(`Credencial individual de ${srv.nome} removida do Firestore.`);
-          } catch (e) {
-            console.error('Erro ao deletar credencial privada no Firestore:', e);
-          }
+        if (appState.credentialsMap && appState.credentialsMap[id]) {
+          delete appState.credentialsMap[id];
         }
 
         await syncDocToFirestore('credenciais', id, null, true);
