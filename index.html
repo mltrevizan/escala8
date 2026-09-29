@@ -1,6 +1,9 @@
 <!DOCTYPE html>
 <html lang="pt-BR" class="h-full bg-slate-100">
 <head>
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>8ª Central Regional de Flagrantes - Escala de Plantão e Delegacia</title>
@@ -2218,11 +2221,7 @@
     }
 
     function saveState() {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
-      } catch (e) {
-        console.warn('Aviso: localStorage indisponível ou limite excedido. Estado mantido temporariamente em memória.');
-      }
+      // Gravação em LocalStorage desativada para evitar conflitos de cache local.
       syncStateToFirestore();
     }
 
@@ -2245,30 +2244,38 @@
     function loadStateFromFirestore(callback) {
       if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
         const db = firebase.firestore();
-        db.collection('appData').doc('globalState').get()
-          .then(doc => {
-            if (doc.exists) {
-              const remoteData = doc.data();
-              if (remoteData && remoteData.servidores && remoteData.servidores.length > 0) {
-                const currentPadroes = { ...appState.padroesHorarios };
-                appState = { ...appState, ...remoteData };
-                if (remoteData.padroesHorarios) {
-                  appState.padroesHorarios = { ...currentPadroes, ...remoteData.padroesHorarios };
-                }
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
-                console.log('Dados do Cloud Firestore carregados com sucesso!');
+        // Conexão em tempo real (onSnapshot): atualiza a tela de todos instantaneamente
+        db.collection('appData').doc('globalState').onSnapshot(doc => {
+          if (doc.exists) {
+            const remoteData = doc.data();
+            if (remoteData && remoteData.servidores && remoteData.servidores.length > 0) {
+              const currentPadroes = { ...appState.padroesHorarios };
+              const currentProfile = appState.profile;
+              const currentUserId = appState.currentUserServidorId;
+              const currentCalendarMode = appState.calendarMode;
+
+              appState = { ...appState, ...remoteData };
+
+              // Preserva sessão ativa no navegador sem deslogar
+              appState.profile = currentProfile;
+              appState.currentUserServidorId = currentUserId;
+              appState.calendarMode = currentCalendarMode;
+
+              if (remoteData.padroesHorarios) {
+                appState.padroesHorarios = { ...currentPadroes, ...remoteData.padroesHorarios };
               }
-            } else {
-              // Se o documento ainda não existir na nuvem, cria o admin padrão e inicializa a nuvem
-              ensureAdminUserExists();
-              saveState();
+              renderAllViews();
+              console.log('Sincronização em tempo real (onSnapshot) atualizada!');
             }
-            if (callback) callback();
-          })
-          .catch(err => {
-            console.error('Erro ao buscar do Firestore:', err);
-            if (callback) callback();
-          });
+          } else {
+            ensureAdminUserExists();
+            saveState();
+          }
+          if (callback) callback();
+        }, err => {
+          console.error('Erro na escuta em tempo real do Firestore:', err);
+          if (callback) callback();
+        });
       } else {
         if (callback) callback();
       }
