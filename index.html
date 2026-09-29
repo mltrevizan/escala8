@@ -2255,6 +2255,14 @@
         const db = firebase.firestore();
         const collectionsMap = ['servidores', 'escalas', 'sobreavisos', 'ferias', 'feriados', 'sdps', 'delegacias', 'plantonsUnificados', 'auditLogs'];
 
+        let renderTimeout = null;
+        const debouncedRender = () => {
+          if (renderTimeout) clearTimeout(renderTimeout);
+          renderTimeout = setTimeout(() => {
+            renderAllViews();
+          }, 100);
+        };
+
         collectionsMap.forEach(colName => {
           db.collection(colName).onSnapshot(snapshot => {
             const items = [];
@@ -2274,7 +2282,7 @@
               }
             }
 
-            renderAllViews();
+            debouncedRender();
           }, err => {
             console.error(`❌ Erro no listener da coleção ${colName}:`, err);
           });
