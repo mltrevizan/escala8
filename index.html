@@ -2165,7 +2165,7 @@
     }
 
     function loadState() {
-      // Limpeza de cache do navegador e inicialização com padrões em memória
+      // Limpa do navegador qualquer resíduo legado do LocalStorage
       try { localStorage.removeItem(STORAGE_KEY); } catch(e){}
       loadDefaults();
     }
@@ -2180,88 +2180,36 @@
       appState.sobreavisos = [];
       appState.auditLogs = [];
       appState.padroesHorarios = { sobreavisoHoraIn: '09:00', periodicidadeHoras: 72, periodicidadePlantaoHoras: 24, plantaoUtilIn: '17:00', plantaoUtilOut: '09:00', plantaoFdsIn: '17:00', plantaoFdsOut: '17:00' };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
     }
 
-    function saveState() {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
-      } catch (e) {
-        console.warn('Aviso: localStorage indisponível ou limite excedido. Estado mantido temporariamente em memória.');
-      }
-      syncStateToFirestore();
-    }
-
-    // Sincronização granular por documento e coleção no Firestore
+    // Sincronização granular e atômica de documentos individuais
     async function syncDocToFirestore(collectionName, docId, dataObject, isDelete = false) {
       if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
         const db = firebase.firestore();
         try {
           if (isDelete) {
             await db.collection(collectionName).doc(docId).delete();
-            console.log(`[Firestore] Documento ${docId} removido da coleção '${collectionName}'.`);
+            console.log(`[Firestore] Documento ${docId} removido de '${collectionName}'.`);
           } else {
             const cleanObj = JSON.parse(JSON.stringify(dataObject));
             await db.collection(collectionName).doc(docId).set(cleanObj, { merge: true });
-            console.log(`[Firestore] Documento ${docId} salvo/atualizado na coleção '${collectionName}'.`);
+            console.log(`[Firestore] Documento ${docId} salvo/atualizado em '${collectionName}'.`);
           }
         } catch (err) {
-          console.error(`[Firestore Error] Falha ao sincronizar na coleção '${collectionName}':`, err);
+          console.error(`[Firestore Error] Falha na coleção '${collectionName}':`, err);
         }
       }
     }
 
-    // Sincroniza todas as coleções de dados com o Cloud Firestore de forma granular
+    // As operações no Firestore passam a ser 100% atômicas/individuais por formulário.
     function saveState() {
       if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
         const db = firebase.firestore();
-
-        // 1. Servidores
-        appState.servidores.forEach(srv => {
-          db.collection('servidores').doc(srv.id).set(JSON.parse(JSON.stringify(srv)), { merge: true });
-        });
-
-        // 2. Escalas da Central
-        appState.escalas.forEach(esc => {
-          db.collection('escalas').doc(esc.id).set(JSON.parse(JSON.stringify(esc)), { merge: true });
-        });
-
-        // 3. Sobreavisos / Plantões de Delegacia
-        appState.sobreavisos.forEach(sb => {
-          db.collection('sobreavisos').doc(sb.id).set(JSON.parse(JSON.stringify(sb)), { merge: true });
-        });
-
-        // 4. Férias
-        appState.ferias.forEach(f => {
-          db.collection('ferias').doc(f.id).set(JSON.parse(JSON.stringify(f)), { merge: true });
-        });
-
-        // 5. Feriados
-        appState.feriados.forEach(fer => {
-          db.collection('feriados').doc(fer.id).set(JSON.parse(JSON.stringify(fer)), { merge: true });
-        });
-
-        // 6. Subdivisões e Delegacias
-        appState.sdps.forEach(sdp => {
-          db.collection('sdps').doc(sdp.id).set(JSON.parse(JSON.stringify(sdp)), { merge: true });
-        });
-        appState.delegacias.forEach(del => {
-          db.collection('delegacias').doc(del.id).set(JSON.parse(JSON.stringify(del)), { merge: true });
-        });
-
-        // 7. Consórcios / Plantões Unificados
-        (appState.plantonsUnificados || []).forEach(unif => {
-          db.collection('plantonsUnificados').doc(unif.id).set(JSON.parse(JSON.stringify(unif)), { merge: true });
-        });
-
-        // 8. Configurações Globais
         db.collection('configuracoes').doc('geral').set({
           padroesHorarios: appState.padroesHorarios || {},
           permissoes: appState.permissoes || {},
           excecoesDelegacias: appState.excecoesDelegacias || {}
         }, { merge: true });
-
-        console.log('⚡ Todas as coleções granulares foram sincronizadas com o Firestore com sucesso!');
       }
     }
 
@@ -2310,14 +2258,18 @@
       const userIndentifier = activeUser ? `${activeUser.nome} (${appState.profile})` : appState.profile;
       
       const nowISO = new Date().toISOString();
-      appState.auditLogs.unshift({
+      const logId = 'log_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
+      const logObj = {
+        id: logId,
         timestamp: new Date().toLocaleString('pt-BR'),
         perfil: userIndentifier,
         acao: acao.toUpperCase(),
         detalhes: detalhes.toUpperCase(),
         rawDate: nowISO
-      });
-      saveState();
+      };
+      
+      appState.auditLogs.unshift(logObj);
+      syncDocToFirestore('auditLogs', logId, logObj);
     }
 
     
@@ -3187,7 +3139,9 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       if (editShiftId) {
         const idx = appState.escalas.findIndex(e => e.id === editShiftId);
         if (idx !== -1) {
-          appState.escalas[idx] = { id: editShiftId, data: date, periodo: periodo, servidorId: servidorId, extrajornada: extrajornada };
+          const updatedShift = { id: editShiftId, data: date, periodo: periodo, servidorId: servidorId, extrajornada: extrajornada };
+          appState.escalas[idx] = updatedShift;
+          syncDocToFirestore('escalas', editShiftId, updatedShift);
           addAuditLog('Edição Plantão Central', `Atualizado plantão de ${srv ? srv.nome : servidorId} para ${date} (${periodo})`);
         }
         document.getElementById('assign-shift-id-m').value = '';
@@ -3195,13 +3149,15 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
         if (btnSubmit) btnSubmit.textContent = 'Salvar Plantão na Central';
         document.getElementById('form-assign-shift-central').reset();
       } else {
-        appState.escalas.push({
+        const newShiftObj = {
           id: 'e_' + Date.now(),
           data: date,
           periodo: periodo,
           servidorId: servidorId,
           extrajornada: extrajornada
-        });
+        };
+        appState.escalas.push(newShiftObj);
+        syncDocToFirestore('escalas', newShiftObj.id, newShiftObj);
         addAuditLog('Lançamento Central', `Escalado ${srv ? srv.nome : servidorId} para ${date} (${periodo})`);
       }
 
@@ -3249,14 +3205,16 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       if (editSbId) {
         const idx = appState.sobreavisos.findIndex(s => s.id === editSbId);
         if (idx !== -1) {
-          appState.sobreavisos[idx] = { id: editSbId, delegaciaId, modalidade, inicio, fim, viatura, servidoresIds };
+          const updatedSb = { id: editSbId, delegaciaId, modalidade, inicio, fim, viatura, servidoresIds };
+          appState.sobreavisos[idx] = updatedSb;
+          syncDocToFirestore('sobreavisos', editSbId, updatedSb);
           addAuditLog('Edição Escala Delegacia', `Atualizada escala (${modalidade}) para a delegacia selecionada.`);
         }
         document.getElementById('sobreaviso-id').value = '';
         const btnSubmit = document.querySelector('#form-add-sobreaviso button[type="submit"]');
         if (btnSubmit) btnSubmit.textContent = 'Salvar Escala na Delegacia';
       } else {
-        appState.sobreavisos.push({
+        const newSobObj = {
           id: 'sb_' + Date.now(),
           delegaciaId,
           modalidade,
@@ -3264,7 +3222,9 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
           fim,
           viatura,
           servidoresIds
-        });
+        };
+        appState.sobreavisos.push(newSobObj);
+        syncDocToFirestore('sobreavisos', newSobObj.id, newSobObj);
         addAuditLog('Lançamento Delegacia', `Salva escala (${modalidade}) para a delegacia selecionada.`);
       }
 
@@ -4493,12 +4453,21 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
           }
         }
 
-        saveState();
+        await syncDocToFirestore('servidores', id, srv);
+        if (newPassword) {
+          const passHash = await hashPassword(newPassword);
+          await syncDocToFirestore('credenciais', id, {
+            servidorId: id,
+            login: newLogin,
+            hash: passHash,
+            updatedAt: new Date().toISOString()
+          });
+        }
         renderServidoresTable();
         populateLoginUserSelect();
         addAuditLog('Alteração de Credenciais', `Login/Senha de ${srv.nome} atualizados individualmente`);
         ModalManager.close('modal-manage-login');
-        alert(`Credenciais do servidor ${srv.nome} atualizadas com sucesso!`);
+        alert(`Credenciais do servidor ${srv.nome} atualizadas e salvas com sucesso no Firestore!`);
       }
     }
 
@@ -4548,11 +4517,12 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
           }
         }
 
-        saveState();
+        await syncDocToFirestore('credenciais', id, null, true);
+        await syncDocToFirestore('servidores', id, srv);
         populateLoginUserSelect();
         addAuditLog('Reset de Senha', `Senha de ${srv.nome} resetada para a senha padrão por ${appState.profile}`);
         ModalManager.close('modal-manage-login');
-        alert(`Senha do servidor ${srv.nome} resetada com sucesso para a senha padrão de primeiro acesso.`);
+        alert(`Senha do servidor ${srv.nome} resetada com sucesso no Firestore.`);
       }
     }
 
@@ -5223,12 +5193,16 @@ function updateDelegaciaDropdowns() {
         const idx = appState.servidores.findIndex(s => s.id === id);
         if (idx !== -1) {
           const currentLogin = appState.servidores[idx].login || generateServidorLogin(nome, cargo, id);
-          appState.servidores[idx] = { ...appState.servidores[idx], cargo, nome, login: currentLogin, sdpId, delegaciaId, telefone, funcaoCRF, funcaoDP, nivelAcesso, password: null };
+          const updatedSrv = { ...appState.servidores[idx], cargo, nome, login: currentLogin, sdpId, delegaciaId, telefone, funcaoCRF, funcaoDP, nivelAcesso, password: null };
+          appState.servidores[idx] = updatedSrv;
+          syncDocToFirestore('servidores', id, updatedSrv);
           addAuditLog('Edição de Servidor', `Alterados dados de ${nome}`);
         }
       } else {
         const generatedLogin = generateServidorLogin(nome, cargo, null);
-        appState.servidores.push({ id: 's_' + Date.now(), cargo, nome, login: generatedLogin, sdpId, delegaciaId, telefone, funcaoCRF, funcaoDP, nivelAcesso, password: null });
+        const newSrvObj = { id: 's_' + Date.now(), cargo, nome, login: generatedLogin, sdpId, delegaciaId, telefone, funcaoCRF, funcaoDP, nivelAcesso, password: null };
+        appState.servidores.push(newSrvObj);
+        syncDocToFirestore('servidores', newSrvObj.id, newSrvObj);
         addAuditLog('Novo Servidor', `Cadastrado ${cargo} ${nome} (Login: ${generatedLogin})`);
       }
 
