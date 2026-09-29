@@ -1,9 +1,6 @@
 <!DOCTYPE html>
 <html lang="pt-BR" class="h-full bg-slate-100">
 <head>
-  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-  <meta http-equiv="Pragma" content="no-cache">
-  <meta http-equiv="Expires" content="0">
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>8ª Central Regional de Flagrantes - Escala de Plantão e Delegacia</title>
@@ -2168,7 +2165,7 @@
     }
 
     function loadState() {
-      // Zero-Cache: Elimina qualquer resíduo legado do LocalStorage no arranque
+      // Limpeza de cache do navegador e inicialização com padrões em memória
       try { localStorage.removeItem(STORAGE_KEY); } catch(e){}
       loadDefaults();
     }
@@ -2187,59 +2184,120 @@
     }
 
     function saveState() {
-      // Gravação em LocalStorage desativada para evitar conflitos de cache local.
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
+      } catch (e) {
+        console.warn('Aviso: localStorage indisponível ou limite excedido. Estado mantido temporariamente em memória.');
+      }
       syncStateToFirestore();
     }
 
-    // Função de sincronização com o Cloud Firestore
-    function syncStateToFirestore() {
+    // Sincronização granular por documento e coleção no Firestore
+    async function syncDocToFirestore(collectionName, docId, dataObject, isDelete = false) {
       if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
         const db = firebase.firestore();
-        const cleanStateToSync = JSON.parse(JSON.stringify(appState));
-        cleanStateToSync.currentUserServidorId = null;
-        cleanStateToSync.profile = 'VISUALIZADOR';
-        delete cleanStateToSync.credentialsMap;
-        delete cleanStateToSync.credentials; // Protege os hashes contra leitura pública no console
+        try {
+          if (isDelete) {
+            await db.collection(collectionName).doc(docId).delete();
+            console.log(`[Firestore] Documento ${docId} removido da coleção '${collectionName}'.`);
+          } else {
+            const cleanObj = JSON.parse(JSON.stringify(dataObject));
+            await db.collection(collectionName).doc(docId).set(cleanObj, { merge: true });
+            console.log(`[Firestore] Documento ${docId} salvo/atualizado na coleção '${collectionName}'.`);
+          }
+        } catch (err) {
+          console.error(`[Firestore Error] Falha ao sincronizar na coleção '${collectionName}':`, err);
+        }
+      }
+    }
 
-        db.collection('appData').doc('globalState').set(cleanStateToSync, { merge: true })
-          .then(() => console.log('Dados sincronizados com o Cloud Firestore com sucesso!'))
-          .catch(err => console.error('Erro ao sincronizar com Firestore:', err));
+    // Sincroniza todas as coleções de dados com o Cloud Firestore de forma granular
+    function saveState() {
+      if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
+        const db = firebase.firestore();
+
+        // 1. Servidores
+        appState.servidores.forEach(srv => {
+          db.collection('servidores').doc(srv.id).set(JSON.parse(JSON.stringify(srv)), { merge: true });
+        });
+
+        // 2. Escalas da Central
+        appState.escalas.forEach(esc => {
+          db.collection('escalas').doc(esc.id).set(JSON.parse(JSON.stringify(esc)), { merge: true });
+        });
+
+        // 3. Sobreavisos / Plantões de Delegacia
+        appState.sobreavisos.forEach(sb => {
+          db.collection('sobreavisos').doc(sb.id).set(JSON.parse(JSON.stringify(sb)), { merge: true });
+        });
+
+        // 4. Férias
+        appState.ferias.forEach(f => {
+          db.collection('ferias').doc(f.id).set(JSON.parse(JSON.stringify(f)), { merge: true });
+        });
+
+        // 5. Feriados
+        appState.feriados.forEach(fer => {
+          db.collection('feriados').doc(fer.id).set(JSON.parse(JSON.stringify(fer)), { merge: true });
+        });
+
+        // 6. Subdivisões e Delegacias
+        appState.sdps.forEach(sdp => {
+          db.collection('sdps').doc(sdp.id).set(JSON.parse(JSON.stringify(sdp)), { merge: true });
+        });
+        appState.delegacias.forEach(del => {
+          db.collection('delegacias').doc(del.id).set(JSON.parse(JSON.stringify(del)), { merge: true });
+        });
+
+        // 7. Consórcios / Plantões Unificados
+        (appState.plantonsUnificados || []).forEach(unif => {
+          db.collection('plantonsUnificados').doc(unif.id).set(JSON.parse(JSON.stringify(unif)), { merge: true });
+        });
+
+        // 8. Configurações Globais
+        db.collection('configuracoes').doc('geral').set({
+          padroesHorarios: appState.padroesHorarios || {},
+          permissoes: appState.permissoes || {},
+          excecoesDelegacias: appState.excecoesDelegacias || {}
+        }, { merge: true });
+
+        console.log('⚡ Todas as coleções granulares foram sincronizadas com o Firestore com sucesso!');
       }
     }
 
     function loadStateFromFirestore(callback) {
       if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
         const db = firebase.firestore();
-        // Conexão em tempo real (onSnapshot): atualiza a tela de todos instantaneamente
-        db.collection('appData').doc('globalState').onSnapshot(doc => {
-          if (doc.exists) {
-            const remoteData = doc.data();
-            if (remoteData && remoteData.servidores && remoteData.servidores.length > 0) {
-              const currentPadroes = { ...appState.padroesHorarios };
-              const currentProfile = appState.profile;
-              const currentUserId = appState.currentUserServidorId;
-              const currentCalendarMode = appState.calendarMode;
+        const collectionsMap = ['servidores', 'escalas', 'sobreavisos', 'ferias', 'feriados', 'sdps', 'delegacias', 'plantonsUnificados', 'auditLogs'];
 
-              appState = { ...appState, ...remoteData };
+        collectionsMap.forEach(colName => {
+          db.collection(colName).onSnapshot(snapshot => {
+            const items = [];
+            snapshot.forEach(doc => {
+              items.push({ ...doc.data(), id: doc.id });
+            });
 
-              // Preserva sessão ativa no navegador sem deslogar
-              appState.profile = currentProfile;
-              appState.currentUserServidorId = currentUserId;
-              appState.calendarMode = currentCalendarMode;
+            appState[colName] = items;
 
-              if (remoteData.padroesHorarios) {
-                appState.padroesHorarios = { ...currentPadroes, ...remoteData.padroesHorarios };
-              }
-              renderAllViews();
-              console.log('Sincronização em tempo real (onSnapshot) atualizada!');
+            if (colName === 'servidores') {
+              ensureAdminUserExists();
             }
-          } else {
-            ensureAdminUserExists();
-            saveState();
+
+            renderAllViews();
+            console.log(`⚡ Sincronização em tempo real: Coleção '${colName}' atualizada (${items.length} itens).`);
+          }, err => {
+            console.error(`❌ Erro no ouvinte da coleção ${colName}:`, err);
+          });
+        });
+
+        db.collection('configuracoes').doc('geral').onSnapshot(doc => {
+          if (doc.exists) {
+            const configData = doc.data();
+            if (configData.padroesHorarios) appState.padroesHorarios = configData.padroesHorarios;
+            if (configData.permissoes) appState.permissoes = configData.permissoes;
+            if (configData.excecoesDelegacias) appState.excecoesDelegacias = configData.excecoesDelegacias;
+            renderAllViews();
           }
-          if (callback) callback();
-        }, err => {
-          console.error('Erro na escuta em tempo real do Firestore:', err);
           if (callback) callback();
         });
       } else {
@@ -2846,15 +2904,15 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       for (let i = 0; i < 365; i++) {
         const dateStr = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, '0')}-${String(checkDate.getDate()).padStart(2, '0')}`;
         
-        const hasDiurnoRegular = appState.escalas.some(e => e.data === dateStr && e.periodo === 'DIURNO' && !e.extrajornada);
-        if (!hasDiurnoRegular) {
+        const hasDiurno = appState.escalas.some(e => e.data === dateStr && e.periodo === 'DIURNO');
+        if (!hasDiurno) {
           dateInput.value = dateStr;
           periodSelect.value = 'DIURNO';
           return;
         }
 
-        const hasNoturnoRegular = appState.escalas.some(e => e.data === dateStr && e.periodo === 'NOTURNO' && !e.extrajornada);
-        if (!hasNoturnoRegular) {
+        const hasNoturno = appState.escalas.some(e => e.data === dateStr && e.periodo === 'NOTURNO');
+        if (!hasNoturno) {
           dateInput.value = dateStr;
           periodSelect.value = 'NOTURNO';
           return;
@@ -3335,7 +3393,7 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       if (confirm('Deseja remover este plantão da Central de Flagrantes?')) {
         const item = appState.escalas.find(e => e.id === id);
         appState.escalas = appState.escalas.filter(e => e.id !== id);
-        saveState();
+        syncDocToFirestore('escalas', id, null, true);
         renderCalendar();
         renderCentralVigentesTable();
         if (item) addAuditLog('Exclusão Plantão Central', `Removido plantão de ${item.data} (${item.periodo})`);
@@ -3422,7 +3480,7 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
 
       if (confirm('Deseja excluir este lançamento de escala da Delegacia?')) {
         appState.sobreavisos = appState.sobreavisos.filter(item => item.id !== id);
-        saveState();
+        syncDocToFirestore('sobreavisos', id, null, true);
         renderSobreavisoTable();
         renderCalendar();
         addAuditLog('Exclusão Escala Delegacia', `Removido lançamento da delegacia.`);
@@ -4752,7 +4810,7 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       }
       if (confirm('Deseja excluir este registro de férias?')) {
         appState.ferias = appState.ferias.filter(f => f.id !== id);
-        saveState();
+        syncDocToFirestore('ferias', id, null, true);
         renderFeriasTable();
         renderCalendar();
       }
@@ -5198,8 +5256,8 @@ function updateDelegaciaDropdowns() {
         const srv = appState.servidores.find(s => s.id === id);
         appState.servidores = appState.servidores.filter(s => s.id !== id);
         appState.escalas = appState.escalas.filter(e => e.servidorId !== id);
+        syncDocToFirestore('servidores', id, null, true);
         addAuditLog('Exclusão de Servidor', `Removido servidor ${srv ? srv.nome : id}`);
-        saveState();
         renderServidoresTable();
         renderSobreavisoTable();
         renderCalendar();
