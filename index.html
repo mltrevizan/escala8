@@ -2168,43 +2168,9 @@
     }
 
     function loadState() {
-      // MIGRAÇÃO AUTOMÁTICA: Impede que senhas/dados sejam zerados ao atualizar a versão no navegador
-      if (!localStorage.getItem(STORAGE_KEY)) {
-        const legacyKeys = ['ESCALA_FLAGRANTES_V9', 'ESCALA_FLAGRANTES_V8', 'ESCALA_FLAGRANTES_V7', 'ESCALA_FLAGRANTES_V1'];
-        for (const k of legacyKeys) {
-          const legacyData = localStorage.getItem(k);
-          if (legacyData) {
-            localStorage.setItem(STORAGE_KEY, legacyData);
-            break;
-          }
-        }
-      }
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        try {
-          appState = JSON.parse(saved);
-          if (!appState.auditLogs) appState.auditLogs = [];
-          if (!appState.permissoes) appState.permissoes = JSON.parse(JSON.stringify(DEFAULT_PERMISSOES));
-          if (!appState.ferias) appState.ferias = [];
-          if (!appState.sobreavisos) appState.sobreavisos = [];
-          if (!appState.feriados || appState.feriados.length === 0) appState.feriados = [...DEFAULT_FERIADOS_NACIONAIS];
-          if (!appState.padroesHorarios) {
-            appState.padroesHorarios = { sobreavisoHoraIn: '09:00', periodicidadeHoras: 72, periodicidadePlantaoHoras: 24, plantaoUtilIn: '17:00', plantaoUtilOut: '09:00', plantaoFdsIn: '17:00', plantaoFdsOut: '17:00' };
-          } else {
-            if (!appState.padroesHorarios.periodicidadeDias) appState.padroesHorarios.periodicidadeDias = 3;
-            if (!appState.padroesHorarios.periodicidadePlantaoHoras) appState.padroesHorarios.periodicidadePlantaoHoras = 24;
-          }
-          
-          appState.servidores.forEach((srv) => {
-            srv.nome = srv.nome.toUpperCase();
-            srv.cargo = srv.cargo.toUpperCase();
-            srv.telefone = formatPhoneNumber(srv.telefone);
-            if (!srv.funcaoCRF) srv.funcaoCRF = ['ROTATIVO', 'FIXO', 'COORDENADOR'].includes(srv.tipo) ? srv.tipo : 'ROTATIVO';
-            if (!srv.funcaoDP) srv.funcaoDP = ['PLANTONISTA', 'SOBREAVISO', 'SUPERINTENDENTE'].includes(srv.tipo) ? srv.tipo : 'PLANTONISTA';
-            if (!srv.login) srv.login = generateServidorLogin(srv.nome, srv.cargo, srv.id);
-          });
-        } catch(e) { loadDefaults(); }
-      } else { loadDefaults(); }
+      // Zero-Cache: Elimina qualquer resíduo legado do LocalStorage no arranque
+      try { localStorage.removeItem(STORAGE_KEY); } catch(e){}
+      loadDefaults();
     }
 
     function loadDefaults() {
@@ -2880,15 +2846,15 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       for (let i = 0; i < 365; i++) {
         const dateStr = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, '0')}-${String(checkDate.getDate()).padStart(2, '0')}`;
         
-        const hasDiurno = appState.escalas.some(e => e.data === dateStr && e.periodo === 'DIURNO');
-        if (!hasDiurno) {
+        const hasDiurnoRegular = appState.escalas.some(e => e.data === dateStr && e.periodo === 'DIURNO' && !e.extrajornada);
+        if (!hasDiurnoRegular) {
           dateInput.value = dateStr;
           periodSelect.value = 'DIURNO';
           return;
         }
 
-        const hasNoturno = appState.escalas.some(e => e.data === dateStr && e.periodo === 'NOTURNO');
-        if (!hasNoturno) {
+        const hasNoturnoRegular = appState.escalas.some(e => e.data === dateStr && e.periodo === 'NOTURNO' && !e.extrajornada);
+        if (!hasNoturnoRegular) {
           dateInput.value = dateStr;
           periodSelect.value = 'NOTURNO';
           return;
