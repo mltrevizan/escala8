@@ -2253,53 +2253,31 @@
     function loadStateFromFirestore(callback) {
       if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
         const db = firebase.firestore();
-        const collectionsMap = ['servidores', 'escalas', 'sobreavisos', 'ferias', 'feriados', 'sdps', 'delegacias', 'plantonsUnificados', 'auditLogs'];
-
-        let renderTimeout = null;
-        const debouncedRender = () => {
-          if (renderTimeout) clearTimeout(renderTimeout);
-          renderTimeout = setTimeout(() => {
-            renderAllViews();
-          }, 100);
-        };
-
-        collectionsMap.forEach(colName => {
-          db.collection(colName).onSnapshot(snapshot => {
-            const items = [];
-            snapshot.forEach(doc => {
-              items.push({ ...doc.data(), id: doc.id });
-            });
-
-            appState[colName] = items;
-
-            if (colName === 'servidores') {
-              ensureAdminUserExists();
-              if (appState.currentUserServidorId) {
-                const currentSrv = items.find(s => s.id === appState.currentUserServidorId);
-                if (currentSrv) {
-                  appState.profile = currentSrv.nivelAcesso || (currentSrv.cargo === 'DELEGADO' ? 'DELEGADO' : 'APJ');
+        db.collection('appData').doc('globalState').get()
+          .then(doc => {
+            if (doc.exists) {
+              const remoteData = doc.data();
+              if (remoteData && remoteData.servidores && remoteData.servidores.length > 0) {
+                const currentPadroes = { ...appState.padroesHorarios };
+                appState = { ...appState, ...remoteData };
+                if (remoteData.padroesHorarios) {
+                  appState.padroesHorarios = { ...currentPadroes, ...remoteData.padroesHorarios };
                 }
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
+                console.log('Dados do Cloud Firestore carregados com sucesso!');
               }
+            } else {
+              // Se o documento ainda não existir na nuvem, cria o admin padrão e inicializa a nuvem
+              ensureAdminUserExists();
+              saveState();
             }
-
-            debouncedRender();
-          }, err => {
-            console.error(`❌ Erro no listener da coleção ${colName}:`, err);
+            if (callback) callback();
+          })
+          .catch(err => {
+            console.error('Erro ao buscar do Firestore:', err);
+            if (callback) callback();
           });
-        });
-
-        db.collection('configuracoes').doc('geral').onSnapshot(doc => {
-          if (doc.exists) {
-            const configData = doc.data();
-            if (configData.padroesHorarios) appState.padroesHorarios = configData.padroesHorarios;
-            if (configData.permissoes) appState.permissoes = configData.permissoes;
-            if (configData.excecoesDelegacias) appState.excecoesDelegacias = configData.excecoesDelegacias;
-          }
-          renderAllViews();
-          if (callback) callback();
-        });
       } else {
-        renderAllViews();
         if (callback) callback();
       }
     }
@@ -3158,7 +3136,7 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
     }
 
     
-    async function handleAssignShiftModal(e) {
+    function handleAssignShiftModal(e) {
       if (e) e.preventDefault();
       if (!hasPermission('gestaoCRF')) {
         alert('Acesso Negado: Seu perfil não possui permissão para lançar plantões na Central de Flagrantes.');
@@ -3194,15 +3172,13 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
         if (btnSubmit) btnSubmit.textContent = 'Salvar Plantão na Central';
         document.getElementById('form-assign-shift-central').reset();
       } else {
-        const newShiftObj = {
+        appState.escalas.push({
           id: 'e_' + Date.now(),
           data: date,
           periodo: periodo,
           servidorId: servidorId,
           extrajornada: extrajornada
-        };
-        appState.escalas.push(newShiftObj);
-        await syncDocToFirestore('escalas', newShiftObj.id, newShiftObj);
+        });
         addAuditLog('Lançamento Central', `Escalado ${srv ? srv.nome : servidorId} para ${date} (${periodo})`);
       }
 
@@ -3213,7 +3189,7 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       alert('Plantão salvo com sucesso na Central!');
     }
 
-    async function handleSaveSobreaviso(e) {
+    function handleSaveSobreaviso(e) {
       if (e) e.preventDefault();
       const delegaciaId = document.getElementById('gestao-sobreaviso-delegacia').value;
       const modalidade = document.getElementById('sobreaviso-modalidade').value;
@@ -3257,7 +3233,7 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
         const btnSubmit = document.querySelector('#form-add-sobreaviso button[type="submit"]');
         if (btnSubmit) btnSubmit.textContent = 'Salvar Escala na Delegacia';
       } else {
-        const newSbObj = {
+        appState.sobreavisos.push({
           id: 'sb_' + Date.now(),
           delegaciaId,
           modalidade,
@@ -3265,9 +3241,7 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
           fim,
           viatura,
           servidoresIds
-        };
-        appState.sobreavisos.push(newSbObj);
-        await syncDocToFirestore('sobreavisos', newSbObj.id, newSbObj);
+        });
         addAuditLog('Lançamento Delegacia', `Salva escala (${modalidade}) para a delegacia selecionada.`);
       }
 
@@ -5177,7 +5151,7 @@ function updateDelegaciaDropdowns() {
       }
     }
 
-    async function handleSaveServidor(e) {
+    function handleSaveServidor(e) {
       e.preventDefault();
       const id = document.getElementById('servidor-id').value;
       const activeUser = getActiveUserServidor();
@@ -5231,9 +5205,7 @@ function updateDelegaciaDropdowns() {
         }
       } else {
         const generatedLogin = generateServidorLogin(nome, cargo, null);
-        const newSrvObj = { id: 's_' + Date.now(), cargo, nome, login: generatedLogin, sdpId, delegaciaId, telefone, funcaoCRF, funcaoDP, nivelAcesso, password: null };
-        appState.servidores.push(newSrvObj);
-        await syncDocToFirestore('servidores', newSrvObj.id, newSrvObj);
+        appState.servidores.push({ id: 's_' + Date.now(), cargo, nome, login: generatedLogin, sdpId, delegaciaId, telefone, funcaoCRF, funcaoDP, nivelAcesso, password: null });
         addAuditLog('Novo Servidor', `Cadastrado ${cargo} ${nome} (Login: ${generatedLogin})`);
       }
 
@@ -5693,7 +5665,7 @@ function findServidorByApproxName(rawName) {
       }) || null;
     }
 
-    async function processCsvServidoresCompare(lines) {
+    function processCsvServidoresCompare(lines) {
       if (!hasPermission('verServidores')) {
         alert('Acesso Negado: Seu perfil não possui permissão para importar ou gerenciar a base de servidores.');
         return;
@@ -5751,6 +5723,7 @@ function findServidorByApproxName(rawName) {
         let idxAcesso = headers.findIndex(h => h.includes('nivel') || h.includes('acesso'));
         let nivelAcesso = (idxAcesso !== -1 && cols[idxAcesso]) ? cols[idxAcesso].trim().toUpperCase() : (cargo === 'DELEGADO' ? 'DELEGADO' : 'APJ');
         
+        // Trava de Segurança: Apenas o ADMINISTRADOR pode atribuir os perfis ADMINISTRADOR ou COORDENADOR
         if ((nivelAcesso === 'ADMINISTRADOR' || nivelAcesso === 'COORDENADOR') && appState.profile !== 'ADMINISTRADOR') {
           nivelAcesso = (cargo === 'DELEGADO') ? 'DELEGADO' : 'APJ';
         }
@@ -5761,27 +5734,20 @@ function findServidorByApproxName(rawName) {
 
         const existingIdx = appState.servidores.findIndex(s => s.nome.toUpperCase() === nome);
         if (existingIdx !== -1 && !canUserModifyServidor(appState.servidores[existingIdx].id)) {
-          continue;
+          continue; // Pula a atualização de servidores fora do escopo do usuário conectado
         }
         const generatedLogin = generateServidorLogin(nome, cargo, existingIdx !== -1 ? appState.servidores[existingIdx].id : null);
-
-        let srvObj = null;
 
         if (existingIdx !== -1) {
           let oldPhone = appState.servidores[existingIdx].telefone;
           let phoneToKeep = (formattedPhone === '(00)00000-0000' && oldPhone && oldPhone !== '(00)00000-0000') ? oldPhone : formattedPhone;
 
-          srvObj = { ...appState.servidores[existingIdx], cargo, nome, login: generatedLogin, sdpId: sdpMatched ? sdpMatched.id : '8SDP', delegaciaId: delMatched ? delMatched.id : 'DEL_8SDP_P', telefone: phoneToKeep, funcaoCRF, funcaoDP, nivelAcesso };
-          appState.servidores[existingIdx] = srvObj;
+          appState.servidores[existingIdx] = { ...appState.servidores[existingIdx], cargo, nome, login: generatedLogin, sdpId: sdpMatched ? sdpMatched.id : '8SDP', delegaciaId: delMatched ? delMatched.id : 'DEL_8SDP_P', telefone: phoneToKeep, funcaoCRF, funcaoDP, nivelAcesso };
           atualizadosCount++;
         } else {
-          srvObj = { id: 's_imp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4), cargo, nome, login: generatedLogin, sdpId: sdpMatched ? sdpMatched.id : '8SDP', delegaciaId: delMatched ? delMatched.id : 'DEL_8SDP_P', telefone: formattedPhone, funcaoCRF, funcaoDP, nivelAcesso };
-          appState.servidores.push(srvObj);
+          appState.servidores.push({ id: 's_imp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4), cargo, nome, login: generatedLogin, sdpId: sdpMatched ? sdpMatched.id : '8SDP', delegaciaId: delMatched ? delMatched.id : 'DEL_8SDP_P', telefone: formattedPhone, funcaoCRF, funcaoDP, nivelAcesso });
           novosCount++;
         }
-
-        // Persiste individual e assincronamente no Firestore
-        await syncDocToFirestore('servidores', srvObj.id, srvObj);
       }
 
       saveState();
@@ -5792,7 +5758,7 @@ function findServidorByApproxName(rawName) {
       populateLoginUserSelect();
       addAuditLog('Importação de Servidores', `Novos: ${novosCount}, Atualizados: ${atualizadosCount}`);
       ModalManager.close('modal-import-csv');
-      alert(`Servidores importados e salvos com sucesso no Firestore!\nNovos: ${novosCount}\nAtualizados: ${atualizadosCount}`);
+      alert(`Servidores importados!\nNovos: ${novosCount}\nAtualizados: ${atualizadosCount}`);
     }
 
     function processCsvSubdivisoesCompare(lines) {
