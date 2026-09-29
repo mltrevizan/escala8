@@ -3142,7 +3142,7 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
     }
 
     
-    function handleAssignShiftModal(e) {
+    async function handleAssignShiftModal(e) {
       if (e) e.preventDefault();
       if (!hasPermission('gestaoCRF')) {
         alert('Acesso Negado: Seu perfil não possui permissão para lançar plantões na Central de Flagrantes.');
@@ -3199,7 +3199,7 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       alert('Plantão salvo com sucesso na Central!');
     }
 
-    function handleSaveSobreaviso(e) {
+    async function handleSaveSobreaviso(e) {
       if (e) e.preventDefault();
       const delegaciaId = document.getElementById('gestao-sobreaviso-delegacia').value;
       const modalidade = document.getElementById('sobreaviso-modalidade').value;
@@ -5168,7 +5168,7 @@ function updateDelegaciaDropdowns() {
       }
     }
 
-    function handleSaveServidor(e) {
+    async function handleSaveServidor(e) {
       e.preventDefault();
       const id = document.getElementById('servidor-id').value;
       const activeUser = getActiveUserServidor();
