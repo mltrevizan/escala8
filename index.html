@@ -2205,15 +2205,22 @@
         const db = firebase.firestore();
         try {
           if (isDelete) {
-            await db.collection(collectionName).doc(docId).delete();
+            await db.collection(collectionName).doc(String(docId)).delete();
             console.log(`[Firestore] Documento ${docId} removido de '${collectionName}'.`);
           } else {
-            const cleanObj = JSON.parse(JSON.stringify(dataObject));
-            await db.collection(collectionName).doc(docId).set(cleanObj, { merge: true });
-            console.log(`[Firestore] Documento ${docId} salvo/atualizado em '${collectionName}'.`);
+            // Sanitização rigorosa contra valores undefined/null incompatíveis
+            const rawJson = JSON.stringify(dataObject, (key, value) => {
+              if (value === undefined) return "";
+              return value;
+            });
+            const cleanObj = JSON.parse(rawJson);
+            await db.collection(collectionName).doc(String(docId)).set(cleanObj, { merge: true });
+            console.log(`[Firestore] Documento ${docId} salvo com sucesso em '${collectionName}'.`);
           }
         } catch (err) {
-          console.error(`[Firestore Error] Falha na coleção '${collectionName}':`, err);
+          console.error(`[Firestore Error] Falha grave na coleção '${collectionName}':`, err);
+          alert(`ERRO DE CONEXÃO COM O FIRESTORE:\n\nNão foi possível salvar na coleção '${collectionName}'.\n\nDetalhe: ${err.message}`);
+          throw err;
         }
       }
     }
@@ -3181,7 +3188,7 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
           extrajornada: extrajornada
         };
         appState.escalas.push(newShiftObj);
-        syncDocToFirestore('escalas', newShiftObj.id, newShiftObj);
+        await syncDocToFirestore('escalas', newShiftObj.id, newShiftObj);
         addAuditLog('Lançamento Central', `Escalado ${srv ? srv.nome : servidorId} para ${date} (${periodo})`);
       }
 
@@ -3248,7 +3255,7 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
           servidoresIds
         };
         appState.sobreavisos.push(newSobObj);
-        syncDocToFirestore('sobreavisos', newSobObj.id, newSobObj);
+        await syncDocToFirestore('sobreavisos', newSobObj.id, newSobObj);
         addAuditLog('Lançamento Delegacia', `Salva escala (${modalidade}) para a delegacia selecionada.`);
       }
 
@@ -5219,7 +5226,7 @@ function updateDelegaciaDropdowns() {
         const generatedLogin = generateServidorLogin(nome, cargo, null);
         const newSrvObj = { id: 's_' + Date.now(), cargo, nome, login: generatedLogin, sdpId, delegaciaId, telefone, funcaoCRF, funcaoDP, nivelAcesso, password: null };
         appState.servidores.push(newSrvObj);
-        syncDocToFirestore('servidores', newSrvObj.id, newSrvObj);
+        await syncDocToFirestore('servidores', newSrvObj.id, newSrvObj);
         addAuditLog('Novo Servidor', `Cadastrado ${cargo} ${nome} (Login: ${generatedLogin})`);
       }
 
