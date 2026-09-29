@@ -4455,7 +4455,7 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
       if (srv) {
         srv.login = newLogin;
 
-        // 1. Salva a nova credencial primeiro (se informada)
+        // 1. Salva a nova credencial com gravação direta e tratamento de exceção no Firestore
         if (newPassword) {
           const passHash = await hashPassword(newPassword);
           srv.password = null;
@@ -4463,12 +4463,24 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
           if (!appState.credentialsMap) appState.credentialsMap = {};
           appState.credentialsMap[id] = passHash;
 
-          await syncDocToFirestore('credenciais', id, {
-            servidorId: id,
-            login: newLogin,
-            hash: passHash,
-            updatedAt: new Date().toISOString()
-          });
+          if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
+            try {
+              const db = firebase.firestore();
+              const credPayload = {
+                servidorId: String(id),
+                login: String(newLogin),
+                hash: String(passHash),
+                updatedAt: new Date().toISOString()
+              };
+              
+              await db.collection('credenciais').doc(String(id)).set(credPayload);
+              console.log(`✅ Senha gravada com sucesso no Firestore para o servidor ID: ${id}`);
+            } catch (errCred) {
+              console.error('❌ ERRO AO GRAVAR CREDENCIAL NO FIRESTORE:', errCred);
+              alert(`ATENÇÃO: O banco de dados recusou a gravação da senha!\n\nDetalhe do erro: ${errCred.message}\n\nVerifique as Regras de Segurança no Console do Firebase.`);
+              return;
+            }
+          }
         }
 
         // 2. Atualiza a coleção de servidores por último
