@@ -3194,13 +3194,15 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
         if (btnSubmit) btnSubmit.textContent = 'Salvar Plantão na Central';
         document.getElementById('form-assign-shift-central').reset();
       } else {
-        appState.escalas.push({
+        const newShiftObj = {
           id: 'e_' + Date.now(),
           data: date,
           periodo: periodo,
           servidorId: servidorId,
           extrajornada: extrajornada
-        });
+        };
+        appState.escalas.push(newShiftObj);
+        await syncDocToFirestore('escalas', newShiftObj.id, newShiftObj);
         addAuditLog('Lançamento Central', `Escalado ${srv ? srv.nome : servidorId} para ${date} (${periodo})`);
       }
 
@@ -3255,7 +3257,7 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
         const btnSubmit = document.querySelector('#form-add-sobreaviso button[type="submit"]');
         if (btnSubmit) btnSubmit.textContent = 'Salvar Escala na Delegacia';
       } else {
-        appState.sobreavisos.push({
+        const newSbObj = {
           id: 'sb_' + Date.now(),
           delegaciaId,
           modalidade,
@@ -3263,7 +3265,9 @@ Este é o seu primeiro acesso com a senha padrão. Por motivos de segurança, ca
           fim,
           viatura,
           servidoresIds
-        });
+        };
+        appState.sobreavisos.push(newSbObj);
+        await syncDocToFirestore('sobreavisos', newSbObj.id, newSbObj);
         addAuditLog('Lançamento Delegacia', `Salva escala (${modalidade}) para a delegacia selecionada.`);
       }
 
@@ -5227,7 +5231,9 @@ function updateDelegaciaDropdowns() {
         }
       } else {
         const generatedLogin = generateServidorLogin(nome, cargo, null);
-        appState.servidores.push({ id: 's_' + Date.now(), cargo, nome, login: generatedLogin, sdpId, delegaciaId, telefone, funcaoCRF, funcaoDP, nivelAcesso, password: null });
+        const newSrvObj = { id: 's_' + Date.now(), cargo, nome, login: generatedLogin, sdpId, delegaciaId, telefone, funcaoCRF, funcaoDP, nivelAcesso, password: null };
+        appState.servidores.push(newSrvObj);
+        await syncDocToFirestore('servidores', newSrvObj.id, newSrvObj);
         addAuditLog('Novo Servidor', `Cadastrado ${cargo} ${nome} (Login: ${generatedLogin})`);
       }
 
@@ -5687,7 +5693,7 @@ function findServidorByApproxName(rawName) {
       }) || null;
     }
 
-    function processCsvServidoresCompare(lines) {
+    async function processCsvServidoresCompare(lines) {
       if (!hasPermission('verServidores')) {
         alert('Acesso Negado: Seu perfil não possui permissão para importar ou gerenciar a base de servidores.');
         return;
@@ -5745,7 +5751,6 @@ function findServidorByApproxName(rawName) {
         let idxAcesso = headers.findIndex(h => h.includes('nivel') || h.includes('acesso'));
         let nivelAcesso = (idxAcesso !== -1 && cols[idxAcesso]) ? cols[idxAcesso].trim().toUpperCase() : (cargo === 'DELEGADO' ? 'DELEGADO' : 'APJ');
         
-        // Trava de Segurança: Apenas o ADMINISTRADOR pode atribuir os perfis ADMINISTRADOR ou COORDENADOR
         if ((nivelAcesso === 'ADMINISTRADOR' || nivelAcesso === 'COORDENADOR') && appState.profile !== 'ADMINISTRADOR') {
           nivelAcesso = (cargo === 'DELEGADO') ? 'DELEGADO' : 'APJ';
         }
@@ -5756,20 +5761,27 @@ function findServidorByApproxName(rawName) {
 
         const existingIdx = appState.servidores.findIndex(s => s.nome.toUpperCase() === nome);
         if (existingIdx !== -1 && !canUserModifyServidor(appState.servidores[existingIdx].id)) {
-          continue; // Pula a atualização de servidores fora do escopo do usuário conectado
+          continue;
         }
         const generatedLogin = generateServidorLogin(nome, cargo, existingIdx !== -1 ? appState.servidores[existingIdx].id : null);
+
+        let srvObj = null;
 
         if (existingIdx !== -1) {
           let oldPhone = appState.servidores[existingIdx].telefone;
           let phoneToKeep = (formattedPhone === '(00)00000-0000' && oldPhone && oldPhone !== '(00)00000-0000') ? oldPhone : formattedPhone;
 
-          appState.servidores[existingIdx] = { ...appState.servidores[existingIdx], cargo, nome, login: generatedLogin, sdpId: sdpMatched ? sdpMatched.id : '8SDP', delegaciaId: delMatched ? delMatched.id : 'DEL_8SDP_P', telefone: phoneToKeep, funcaoCRF, funcaoDP, nivelAcesso };
+          srvObj = { ...appState.servidores[existingIdx], cargo, nome, login: generatedLogin, sdpId: sdpMatched ? sdpMatched.id : '8SDP', delegaciaId: delMatched ? delMatched.id : 'DEL_8SDP_P', telefone: phoneToKeep, funcaoCRF, funcaoDP, nivelAcesso };
+          appState.servidores[existingIdx] = srvObj;
           atualizadosCount++;
         } else {
-          appState.servidores.push({ id: 's_imp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4), cargo, nome, login: generatedLogin, sdpId: sdpMatched ? sdpMatched.id : '8SDP', delegaciaId: delMatched ? delMatched.id : 'DEL_8SDP_P', telefone: formattedPhone, funcaoCRF, funcaoDP, nivelAcesso });
+          srvObj = { id: 's_imp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4), cargo, nome, login: generatedLogin, sdpId: sdpMatched ? sdpMatched.id : '8SDP', delegaciaId: delMatched ? delMatched.id : 'DEL_8SDP_P', telefone: formattedPhone, funcaoCRF, funcaoDP, nivelAcesso };
+          appState.servidores.push(srvObj);
           novosCount++;
         }
+
+        // Persiste individual e assincronamente no Firestore
+        await syncDocToFirestore('servidores', srvObj.id, srvObj);
       }
 
       saveState();
@@ -5780,7 +5792,7 @@ function findServidorByApproxName(rawName) {
       populateLoginUserSelect();
       addAuditLog('Importação de Servidores', `Novos: ${novosCount}, Atualizados: ${atualizadosCount}`);
       ModalManager.close('modal-import-csv');
-      alert(`Servidores importados!\nNovos: ${novosCount}\nAtualizados: ${atualizadosCount}`);
+      alert(`Servidores importados e salvos com sucesso no Firestore!\nNovos: ${novosCount}\nAtualizados: ${atualizadosCount}`);
     }
 
     function processCsvSubdivisoesCompare(lines) {
